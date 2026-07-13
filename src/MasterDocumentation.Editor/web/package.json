@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "scripts": { "build": "esbuild src/editor.js --bundle --minify --outfile=dist/editor.js" },
+  "dependencies": {
+    "@tiptap/core": "^3.6.1", "@tiptap/starter-kit": "^3.6.1", "@tiptap/extension-underline": "^3.6.1",
+    "@tiptap/extension-highlight": "^3.6.1", "@tiptap/extension-text-style": "^3.6.1", "@tiptap/extension-color": "^3.6.1",
+    "@tiptap/extension-text-align": "^3.6.1", "@tiptap/extension-link": "^3.6.1", "@tiptap/extension-image": "^3.6.1",
+    "@tiptap/extension-table": "^3.6.1", "@tiptap/extension-task-list": "^3.6.1", "@tiptap/extension-task-item": "^3.6.1",
+    "@tiptap/extension-subscript": "^3.6.1", "@tiptap/extension-superscript": "^3.6.1"
+  },
+  "devDependencies": { "esbuild": "^0.25.0" }
+}

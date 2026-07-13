@@ -1,0 +1,8 @@
+bin/
+obj/
+publish/
+Data/
+*.user
+/.idea/.idea.MasterDocumentation.dir/.idea
+/.vs/MasterDocumentation/CopilotIndices
+/.vs
