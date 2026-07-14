@@ -2,7 +2,8 @@ namespace MasterDocumentation.Models;
 
 public sealed class ApplicationSettings
 {
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
+    public bool FirstRunCompleted { get; set; }
     public string Language { get; set; } = "Русский";
     public string StartupBehavior { get; set; } = "Открывать последнюю сессию";
     public int RecentFilesCount { get; set; } = 10;

@@ -7,3 +7,5 @@ Data/
 /.vs/MasterDocumentation/CopilotIndices
 /.vs
 /src/MasterDocumentation.Editor/web/node_modules
+data-location.txt
+data-location.txt.tmp
