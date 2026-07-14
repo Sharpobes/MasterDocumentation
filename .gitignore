@@ -6,3 +6,4 @@ Data/
 /.idea/.idea.MasterDocumentation.dir/.idea
 /.vs/MasterDocumentation/CopilotIndices
 /.vs
+/src/MasterDocumentation.Editor/web/node_modules
