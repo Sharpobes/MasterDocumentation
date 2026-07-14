@@ -413,15 +413,51 @@ public partial class MainWindow : Window
     private void RestoreSession() { var settings=_settingsService.Load(); if(settings.StartupBehavior=="Открывать последнюю сессию"){foreach(var id in settings.OpenDocumentIds){var node=_vm.Database.FindNode(id);if(node is not null)_vm.Open(node);}if(settings.SelectedDocumentId is long selected){var tab=_vm.Tabs.FirstOrDefault(x=>x.DocumentId==selected);if(tab is not null)_vm.SelectedTab=tab;}}ShowSelectedTab(); }
     private void RestoreWindow() { if (double.TryParse(_vm.Database.GetSetting("Width"), out var w)) Width = Math.Max(MinWidth, w); if (double.TryParse(_vm.Database.GetSetting("Height"), out var h)) Height = Math.Max(MinHeight, h); if (double.TryParse(_vm.Database.GetSetting("Left"), out var l) && double.TryParse(_vm.Database.GetSetting("Top"), out var t)) { WindowStartupLocation = WindowStartupLocation.Manual; Left = l; Top = t; } }
     private void RestorePanelLayout(){if(double.TryParse(_vm.Database.GetSetting("LibraryWidth"),out var library))LibraryColumn.Width=new GridLength(Math.Max(190,library));if(double.TryParse(_vm.Database.GetSetting("StructureWidth"),out var structure))StructureColumn.Width=new GridLength(Math.Max(160,structure));if(double.TryParse(_vm.Database.GetSetting("PropertiesWidth"),out var properties))PropertiesColumn.Width=new GridLength(Math.Max(210,properties));}
-    private async void Window_Closing(object? sender, CancelEventArgs e)
+    private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        if(_closeCommitted)return;e.Cancel=true;if(_closeInProgress)return;if(_settingsView is not null&&SettingsHost.Visibility==Visibility.Visible&&!_settingsView.RequestClose())return;_closeInProgress=true;_saveTimer.Stop();
+        if(_closeCommitted)return;
+
+        // Closing is synchronous. Cancel this attempt first and finish saving outside
+        // the event; otherwise a synchronously completed editor snapshot can call
+        // Close() while WPF is still inside Window.InternalClose.
+        e.Cancel=true;
+        if(_closeInProgress)return;
+        if(_settingsView is not null&&SettingsHost.Visibility==Visibility.Visible&&!_settingsView.RequestClose())return;
+
+        _closeInProgress=true;
+        _saveTimer.Stop();
+        _=CompleteCloseAsync();
+    }
+
+    private async Task CompleteCloseAsync()
+    {
         try
         {
-            if(_vm.SelectedTab is not null&&ModernEditor.Visibility==Visibility.Visible){using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(2));var snapshot=await ModernEditor.CaptureContentAsync(timeout.Token);var tab=_vm.Tabs.FirstOrDefault(x=>x.DocumentId==snapshot.DocumentId);if(tab is not null)ApplyEditorContent(tab,snapshot,false);}
+            try
+            {
+                if(_vm.SelectedTab is not null&&ModernEditor.Visibility==Visibility.Visible)
+                {
+                    using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    var snapshot=await ModernEditor.CaptureContentAsync(timeout.Token);
+                    var tab=_vm.Tabs.FirstOrDefault(x=>x.DocumentId==snapshot.DocumentId);
+                    if(tab is not null)ApplyEditorContent(tab,snapshot,false);
+                }
+            }
+            catch(Exception ex){LogService.Error("Не удалось получить финальный снимок редактора",ex);}
+
+            _vm.SaveAll();
+            SaveSessionAndWindowState();
         }
-        catch(Exception ex){LogService.Error("Не удалось получить финальный снимок редактора",ex);}
-        _vm.SaveAll();SaveSessionAndWindowState();_closeCommitted=true;Close();
+        catch(Exception ex)
+        {
+            LogService.Error("Не удалось завершить сохранение при закрытии",ex);
+            MessageBox.Show(this,"Не удалось полностью сохранить состояние приложения:\n"+ex.Message,"Закрытие приложения",MessageBoxButton.OK,MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _closeCommitted=true;
+            _=Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,new Action(Close));
+        }
     }
     private void SaveSessionAndWindowState(){var settings=_settingsService.Load();settings.OpenDocumentIds=_vm.Tabs.Select(x=>x.DocumentId).ToList();settings.SelectedDocumentId=_vm.SelectedTab?.DocumentId;_settingsService.Save(settings);_vm.Database.SetSetting("LibraryWidth",LibraryColumn.ActualWidth.ToString());_vm.Database.SetSetting("StructureWidth",StructureColumn.ActualWidth.ToString());_vm.Database.SetSetting("PropertiesWidth",PropertiesColumn.ActualWidth.ToString());if(WindowState==WindowState.Normal){_vm.Database.SetSetting("Width",Width.ToString());_vm.Database.SetSetting("Height",Height.ToString());_vm.Database.SetSetting("Left",Left.ToString());_vm.Database.SetSetting("Top",Top.ToString());}}
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();

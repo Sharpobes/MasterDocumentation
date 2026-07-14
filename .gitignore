@@ -1,6 +1,7 @@
 bin/
 obj/
 publish/
+artifacts/
 Data/
 *.user
 /.idea/.idea.MasterDocumentation.dir/.idea

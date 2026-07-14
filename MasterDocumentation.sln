@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MasterDocumentation", "MasterDocumentation.csproj", "{F85451FC-4132-4579-9B4C-504877556C3B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MasterDocumentation.App", "src\MasterDocumentation.App\MasterDocumentation.App.csproj", "{F85451FC-4132-4579-9B4C-504877556C3B}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
@@ -120,6 +120,7 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
+		{F85451FC-4132-4579-9B4C-504877556C3B} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{F830F0FC-B95A-41B6-847D-1C11B7F61F1F} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{3406FB67-ED28-4C12-9944-E0C69760094C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{BCFF1A05-1981-430C-A9B4-4D061F152483} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}

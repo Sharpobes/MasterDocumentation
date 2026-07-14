@@ -1,1 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0-windows</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><RootNamespace>MasterDocumentation</RootNamespace></PropertyGroup><ItemGroup><ProjectReference Include="..\MasterDocumentation.Core\MasterDocumentation.Core.csproj"/><ProjectReference Include="..\MasterDocumentation.Infrastructure\MasterDocumentation.Infrastructure.csproj"/></ItemGroup><ItemGroup><Compile Include="..\..\Services\BackupService.cs" Link="Services\BackupService.cs"/></ItemGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0-windows</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><RootNamespace>MasterDocumentation</RootNamespace></PropertyGroup>
+  <ItemGroup><ProjectReference Include="..\MasterDocumentation.Core\MasterDocumentation.Core.csproj"/><ProjectReference Include="..\MasterDocumentation.Infrastructure\MasterDocumentation.Infrastructure.csproj"/></ItemGroup>
+</Project>
