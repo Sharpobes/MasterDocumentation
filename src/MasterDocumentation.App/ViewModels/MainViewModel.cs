@@ -22,7 +22,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public string Search { get => _search; set { _search = value; OnChanged(); ReloadTree(); } }
     public bool DarkTheme { get => _dark; set=>SetTheme(value?"Тёмная":"Светлая"); }
     public string Theme=>_theme;
-    public MainViewModel(DatabaseService database, BackupService backups,SettingsService settingsService) { Database = database; Backups = backups;_settingsService=settingsService; Database.Initialize();var settings=_settingsService.Load();_theme=settings.Theme;_dark=ResolveDarkTheme(_theme); ReloadTree(); ApplyTheme(); }
+    public MainViewModel(DatabaseService database, BackupService backups,SettingsService settingsService) { Database = database; Backups = backups;_settingsService=settingsService; Database.Initialize();var settings=_settingsService.Load();_theme=settings.Theme;_dark=ResolveDarkTheme(_theme);SystemParameters.StaticPropertyChanged+=(_,args)=>{if(args.PropertyName==nameof(SystemParameters.HighContrast))Application.Current?.Dispatcher.BeginInvoke(ApplyTheme);}; ReloadTree(); ApplyTheme(); }
     public void ReloadTree() { Nodes.Clear();var expanded=(Database.GetSetting("ExpandedNodeIds")??"").Split(',',StringSplitOptions.RemoveEmptyEntries).Select(x=>long.TryParse(x,out var id)?id:0).Where(x=>x>0).ToHashSet();foreach(var n in Database.LoadTree(Search)){ApplyExpanded(n,expanded);Nodes.Add(n);} }
     private static void ApplyExpanded(NodeItem node,HashSet<long> expanded){node.IsExpanded=expanded.Count==0||expanded.Contains(node.Id);foreach(var child in node.Children)ApplyExpanded(child,expanded);}
     public void ShowAll() { Search = ""; ReloadTree(); }
@@ -39,25 +39,26 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         if (tab is null || !tab.IsDirty) return true;
         try { if(!string.IsNullOrWhiteSpace(tab.EditorJson))Database.SaveStructuredContent(tab.DocumentId,tab.EditorJson,tab.Html,tab.PlainText);else Database.SaveDocument(tab.DocumentId, tab.Document, new TextRange(tab.Document.ContentStart, tab.Document.ContentEnd).Text); tab.ModifiedAt = DateTime.Now; tab.IsDirty = false; DraftRecoveryService.Delete(tab.DocumentId); OnChanged(nameof(SelectedTab));return true; }
-        catch (Exception ex) { LogService.Error("Ошибка сохранения документа", ex); MessageBox.Show("Не удалось сохранить документ: " + ex.Message, "Ошибка сохранения", MessageBoxButton.OK, MessageBoxImage.Error);return false; }
+        catch (Exception ex) { LogService.Error("Ошибка сохранения документа", ex);return false; }
     }
     public bool SaveAll() { var saved=true;foreach(var tab in Tabs.ToList())saved=Save(tab)&&saved;return saved; }
     public void ApplyTheme()
     {
-        if (Application.Current is null) return; var r = Application.Current.Resources;
-        r["WindowBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FF111820" : "#FFF7F7F8"));
-        r["PanelBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FF171F29" : "#FFFFFFFF"));
-        r["ElevatedPanelBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FF1F2935" : "#FFF0F3F6"));
-        r["EditorBackgroundBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FF171F29" : "#FFFFFFFF"));
-        r["TextBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FFD6DBE4" : "#FF202124"));
-        r["BorderBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FF2A3442" : "#FFDADCE0"));
-        r["MutedTextBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FF929EAE" : "#FF6B7280"));
-        r["SoftAccentBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FF293544" : "#FFE8F3FA"));
-        r["AccentBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FF8B63D3" : "#FF206EA5"));
-        r["ButtonSurfaceBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FF252F3C" : "#FFF8FAFC"));
-        r["AccentHoverBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FFA77AF1" : "#FF185A89"));
-        r["ScrollTrackBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FF18212B" : "#FFE7EBEF"));
-        r["ScrollThumbBrush"] = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(_dark ? "#FF657283" : "#FF9AA5B1"));
+        if (Application.Current is null) return;
+        var dictionaries = Application.Current.Resources.MergedDictionaries;
+        var themeIndex = dictionaries
+            .Select((dictionary, index) => (dictionary, index))
+            .FirstOrDefault(entry => entry.dictionary.Source?.OriginalString.Contains("/UI/Themes/Colors.", StringComparison.OrdinalIgnoreCase) == true)
+            .index;
+        var requested = new Uri(
+            SystemParameters.HighContrast
+                ? "/MasterDocumentation;component/UI/Themes/Colors.HighContrast.xaml"
+                : _dark
+                    ? "/MasterDocumentation;component/UI/Themes/Colors.Dark.xaml"
+                    : "/MasterDocumentation;component/UI/Themes/Colors.Light.xaml",
+            UriKind.Relative);
+        if (themeIndex >= 0 && dictionaries[themeIndex].Source?.OriginalString.Equals(requested.OriginalString, StringComparison.OrdinalIgnoreCase) != true)
+            dictionaries[themeIndex] = new ResourceDictionary { Source = requested };
     }
     public void SetTheme(string theme,bool save=true){_theme=theme is "Светлая" or "Тёмная" or "Системная"?theme:"Системная";_dark=ResolveDarkTheme(_theme);ApplyTheme();OnChanged(nameof(DarkTheme));OnChanged(nameof(Theme));if(save){var settings=_settingsService.Load();settings.Theme=_theme;_settingsService.Save(settings);}}
     private static bool ResolveDarkTheme(string theme){if(theme=="Тёмная")return true;if(theme=="Светлая")return false;try{return Convert.ToInt32(Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize","AppsUseLightTheme",0)??0)==0;}catch{return true;}}

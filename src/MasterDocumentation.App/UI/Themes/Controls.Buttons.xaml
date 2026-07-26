@@ -1,0 +1,244 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="clr-namespace:MasterDocumentation.UI">
+
+    <Style x:Key="FocusRingStyle">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Border Margin="-3" BorderBrush="{DynamicResource Border/Focus}" BorderThickness="2" CornerRadius="7"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="{x:Type Button}">
+        <Setter Property="MinHeight" Value="{DynamicResource Control.Height.Default}"/>
+        <Setter Property="Padding" Value="{DynamicResource Control.Padding.Default}"/>
+        <Setter Property="Margin" Value="3"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text/Primary}"/>
+        <Setter Property="Background" Value="{DynamicResource Background/SurfaceElevated}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Border/Default}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRingStyle}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Button}">
+                    <Border x:Name="Chrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{StaticResource Radius.Small}">
+                        <Grid>
+                            <ui:ButtonContentPresenter x:Name="ButtonContent"
+                                                       Value="{TemplateBinding Content}"
+                                                       Margin="{TemplateBinding Padding}"
+                                                       Foreground="{TemplateBinding Foreground}"
+                                                       FontFamily="{TemplateBinding FontFamily}"
+                                                       FontSize="{TemplateBinding FontSize}"
+                                                       FontWeight="{TemplateBinding FontWeight}"
+                                                       FontStyle="{TemplateBinding FontStyle}"
+                                                       HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                            <ProgressBar x:Name="BusyBar"
+                                         Height="2"
+                                         Margin="5,0"
+                                         VerticalAlignment="Bottom"
+                                         Visibility="Collapsed"
+                                         IsIndeterminate="True"
+                                         IsHitTestVisible="False"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Background/Hover}"/>
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Border/Strong}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Background/Pressed}"/>
+                            <Setter TargetName="Chrome" Property="RenderTransform">
+                                <Setter.Value><TranslateTransform Y="1"/></Setter.Value>
+                            </Setter>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Background/Surface}"/>
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Border/Subtle}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Text/Disabled}"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                        <Trigger Property="ui:InteractionState.Status" Value="Loading">
+                            <Setter TargetName="BusyBar" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="ButtonContent" Property="Opacity" Value="0.72"/>
+                            <Setter Property="Cursor" Value="Wait"/>
+                        </Trigger>
+                        <Trigger Property="ui:InteractionState.Status" Value="Error">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource State/ErrorSoft}"/>
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource State/Error}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource State/Error}"/>
+                        </Trigger>
+                        <Trigger Property="ui:InteractionState.Status" Value="Success">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource State/SuccessSoft}"/>
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource State/Success}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource State/Success}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="PrimaryButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="Background" Value="{DynamicResource Accent/Primary}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Accent/Primary}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text/OnAccent}"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource Accent/Hover}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource Accent/Hover}"/>
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter Property="Background" Value="{DynamicResource Accent/Pressed}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource Accent/Pressed}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="DangerButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="Foreground" Value="{DynamicResource State/Error}"/>
+        <Setter Property="Background" Value="{DynamicResource State/ErrorSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource State/Error}"/>
+    </Style>
+
+    <Style x:Key="IconButton" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="Width" Value="{StaticResource Control.HitArea.Minimum}"/>
+        <Setter Property="Height" Value="{StaticResource Control.HitArea.Minimum}"/>
+        <Setter Property="MinHeight" Value="{StaticResource Control.HitArea.Minimum}"/>
+        <Setter Property="Padding" Value="6"/>
+        <Setter Property="Margin" Value="2"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text/Secondary}"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Button}">
+                    <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{StaticResource Radius.Small}">
+                        <ui:IconPresenter Value="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" FontSize="{TemplateBinding FontSize}" Margin="{TemplateBinding Padding}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Background/Hover}"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Border/Strong}"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Background/Pressed}"/></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="{DynamicResource Text/Disabled}"/><Setter Property="Cursor" Value="Arrow"/></Trigger>
+                        <Trigger Property="ui:InteractionState.Status" Value="Loading"><Setter TargetName="Chrome" Property="Opacity" Value="0.65"/><Setter Property="Cursor" Value="Wait"/></Trigger>
+                        <Trigger Property="ui:InteractionState.Status" Value="Error"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource State/ErrorSoft}"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource State/Error}"/><Setter Property="Foreground" Value="{DynamicResource State/Error}"/></Trigger>
+                        <Trigger Property="ui:InteractionState.Status" Value="Success"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource State/SuccessSoft}"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource State/Success}"/><Setter Property="Foreground" Value="{DynamicResource State/Success}"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="NavButton" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text/Secondary}"/>
+        <Setter Property="Margin" Value="8,1"/>
+        <Setter Property="Padding" Value="11,7"/>
+        <Setter Property="MinHeight" Value="{DynamicResource Tree.RowHeight}"/>
+    </Style>
+
+    <Style TargetType="{x:Type ToggleButton}">
+        <Setter Property="MinHeight" Value="{DynamicResource Control.Height.Default}"/>
+        <Setter Property="Padding" Value="{DynamicResource Control.Padding.Default}"/>
+        <Setter Property="Margin" Value="3"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text/Primary}"/>
+        <Setter Property="Background" Value="{DynamicResource Background/SurfaceElevated}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Border/Default}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRingStyle}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ToggleButton}">
+                    <Border x:Name="Chrome"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{StaticResource Radius.Small}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Background/Hover}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Accent/Soft}"/>
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Accent/Primary}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Text/Primary}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Background/Pressed}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{DynamicResource Text/Disabled}"/>
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Border/Subtle}"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                        <Trigger Property="ui:InteractionState.Status" Value="Loading"><Setter TargetName="Chrome" Property="Opacity" Value="0.65"/><Setter Property="Cursor" Value="Wait"/></Trigger>
+                        <Trigger Property="ui:InteractionState.Status" Value="Error"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource State/ErrorSoft}"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource State/Error}"/><Setter Property="Foreground" Value="{DynamicResource State/Error}"/></Trigger>
+                        <Trigger Property="ui:InteractionState.Status" Value="Success"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource State/SuccessSoft}"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource State/Success}"/><Setter Property="Foreground" Value="{DynamicResource State/Success}"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="IconToggle" TargetType="{x:Type ToggleButton}" BasedOn="{StaticResource {x:Type ToggleButton}}">
+        <Setter Property="Width" Value="{StaticResource Control.HitArea.Minimum}"/>
+        <Setter Property="Height" Value="{StaticResource Control.HitArea.Minimum}"/>
+        <Setter Property="MinHeight" Value="{StaticResource Control.HitArea.Minimum}"/>
+        <Setter Property="Padding" Value="6"/>
+        <Setter Property="Margin" Value="2"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text/Secondary}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ToggleButton}">
+                    <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{StaticResource Radius.Small}">
+                        <ui:IconPresenter Value="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" FontSize="{TemplateBinding FontSize}" Margin="{TemplateBinding Padding}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Background/Hover}"/></Trigger>
+                        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Accent/Soft}"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Accent/Primary}"/><Setter Property="Foreground" Value="{DynamicResource Text/Primary}"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Background/Pressed}"/></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="{DynamicResource Text/Disabled}"/></Trigger>
+                        <Trigger Property="ui:InteractionState.Status" Value="Loading"><Setter TargetName="Chrome" Property="Opacity" Value="0.65"/><Setter Property="Cursor" Value="Wait"/></Trigger>
+                        <Trigger Property="ui:InteractionState.Status" Value="Error"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource State/ErrorSoft}"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource State/Error}"/><Setter Property="Foreground" Value="{DynamicResource State/Error}"/></Trigger>
+                        <Trigger Property="ui:InteractionState.Status" Value="Success"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource State/SuccessSoft}"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource State/Success}"/><Setter Property="Foreground" Value="{DynamicResource State/Success}"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ToolbarButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource IconButton}">
+        <Setter Property="Width" Value="36"/>
+        <Setter Property="Height" Value="36"/>
+        <Setter Property="MinHeight" Value="36"/>
+    </Style>
+    <Style x:Key="ToolbarToggleButtonStyle" TargetType="{x:Type ToggleButton}" BasedOn="{StaticResource IconToggle}">
+        <Setter Property="Width" Value="36"/>
+        <Setter Property="Height" Value="36"/>
+        <Setter Property="MinHeight" Value="36"/>
+    </Style>
+    <Style x:Key="EditorButton" TargetType="{x:Type Button}" BasedOn="{StaticResource ToolbarButtonStyle}"/>
+    <Style x:Key="EditorToggleButton" TargetType="{x:Type ToggleButton}" BasedOn="{StaticResource ToolbarToggleButtonStyle}"/>
+</ResourceDictionary>

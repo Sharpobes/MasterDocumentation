@@ -9,6 +9,7 @@ using MasterDocumentation.Models;
 using MasterDocumentation.Services;
 using MasterDocumentation.Storage;
 using MasterDocumentation.Utilities;
+using MasterDocumentation.UI;
 
 namespace MasterDocumentation.Views;
 
@@ -48,7 +49,47 @@ public partial class SettingsView : UserControl
 
     private static void SelectCombo(ComboBox box,string value)=>box.SelectedItem=box.Items.OfType<ComboBoxItem>().FirstOrDefault(x=>x.Content?.ToString()==value);
     private static string Selected(ComboBox box)=>(box.SelectedItem as ComboBoxItem)?.Content?.ToString()??box.Text;
-    private void ShowPanel(int index,string title){for(var i=0;i<_panels.Length;i++)_panels[i].Visibility=i==index?Visibility.Visible:Visibility.Collapsed;SectionTitle.Text=title;}
+    private void ShowPanel(int index,string title)
+    {
+        for(var i=0;i<_panels.Length;i++)
+            _panels[i].Visibility=i==index?Visibility.Visible:Visibility.Collapsed;
+        SectionTitle.Text=title;
+        foreach(var button in SettingsNavigationItems.Children.OfType<Button>())
+        {
+            var selected=int.TryParse(button.Tag?.ToString(),out var buttonIndex)&&buttonIndex==index;
+            if(selected)
+            {
+                button.SetResourceReference(Button.BackgroundProperty,"Accent/Soft");
+                button.SetResourceReference(Button.BorderBrushProperty,"Accent/Primary");
+            }
+            else
+            {
+                button.ClearValue(Button.BackgroundProperty);
+                button.ClearValue(Button.BorderBrushProperty);
+            }
+        }
+    }
+    private void SettingsSearch_TextChanged(object sender,TextChangedEventArgs e)
+    {
+        if(SettingsNavigationItems is null)return;
+        var query=SettingsSearchBox.Text.Trim();
+        foreach(var button in SettingsNavigationItems.Children.OfType<Button>())
+        {
+            var searchable=string.Join(" ",FindVisualChildren<TextBlock>(button).Select(text=>text.Text));
+            button.Visibility=string.IsNullOrWhiteSpace(query)||searchable.Contains(query,StringComparison.CurrentCultureIgnoreCase)
+                ?Visibility.Visible
+                :Visibility.Collapsed;
+        }
+    }
+    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root) where T:DependencyObject
+    {
+        for(var i=0;i<VisualTreeHelper.GetChildrenCount(root);i++)
+        {
+            var child=VisualTreeHelper.GetChild(root,i);
+            if(child is T match)yield return match;
+            foreach(var descendant in FindVisualChildren<T>(child))yield return descendant;
+        }
+    }
     private void General_Click(object sender,RoutedEventArgs e)=>ShowPanel(0,"Общие");
     private void Storage_Click(object sender,RoutedEventArgs e)=>ShowPanel(1,"Хранение");
     private void EditorSettings_Click(object sender,RoutedEventArgs e)=>ShowPanel(2,"Редактор");
@@ -103,12 +144,76 @@ public partial class SettingsView : UserControl
     private void CheckDatabase_Click(object sender,RoutedEventArgs e){try{var result=_database.CheckIntegrity();MessageBox.Show(Window.GetWindow(this),result=="ok"?"Целостность базы подтверждена.":"SQLite: "+result,"Проверка базы");}catch(Exception ex){MessageBox.Show(Window.GetWindow(this),ex.Message,"Ошибка",MessageBoxButton.OK,MessageBoxImage.Error);}}
     private void RebuildIndex_Click(object sender,RoutedEventArgs e){try{_database.RebuildSearchIndex();MessageBox.Show(Window.GetWindow(this),"Поисковый индекс перестроен.","Хранилище");}catch(Exception ex){MessageBox.Show(Window.GetWindow(this),"Не удалось перестроить индекс: "+ex.Message,"Ошибка",MessageBoxButton.OK,MessageBoxImage.Error);}}
     private void CleanupAssets_Click(object sender,RoutedEventArgs e){try{_database.CleanupUnusedAssets();LoadStatistics();MessageBox.Show(Window.GetWindow(this),"Неиспользуемые файлы удалены. Файлы, на которые ссылаются документы или версии, сохранены.","Хранилище");}catch(Exception ex){MessageBox.Show(Window.GetWindow(this),"Не удалось очистить файлы: "+ex.Message,"Ошибка",MessageBoxButton.OK,MessageBoxImage.Error);}}
-    private void QuickBackup_Click(object sender,RoutedEventArgs e){try{string? password=null;if(EncryptionCheck.IsChecked==true){var prompt=new PasswordDialog("Пароль для новой резервной копии"){Owner=Window.GetWindow(this)};if(prompt.ShowDialog()!=true)return;password=prompt.Value;}var path=_backups.CreateBackup(false,password);LoadStatistics();MessageBox.Show(Window.GetWindow(this),"Резервная копия создана:\n"+path,"Готово");}catch(Exception ex){MessageBox.Show(Window.GetWindow(this),"Не удалось создать копию: "+ex.Message,"Ошибка",MessageBoxButton.OK,MessageBoxImage.Error);}}
+    private async void QuickBackup_Click(object sender,RoutedEventArgs e)
+    {
+        string? password=null;
+        if(EncryptionCheck.IsChecked==true)
+        {
+            var prompt=new PasswordDialog("Пароль для новой резервной копии"){Owner=Window.GetWindow(this)};
+            if(prompt.ShowDialog()!=true)return;
+            password=prompt.Value;
+        }
+        var button=sender as Button;
+        var previousContent=button?.Content;
+        if(button is not null)
+        {
+            button.Content="Создание копии…";
+            button.IsEnabled=false;
+            InteractionState.SetStatus(button,InteractionStatus.Loading);
+        }
+        try
+        {
+            var path=await Task.Run(()=>_backups.CreateBackup(false,password));
+            LoadStatistics();
+            if(button is not null)InteractionState.SetStatus(button,InteractionStatus.Success);
+            ToastService.Show(
+                "Резервная копия создана",
+                path,
+                ToastKind.Success,
+                TimeSpan.FromSeconds(15),
+                "Показать в папке",
+                ()=>Process.Start(new ProcessStartInfo("explorer.exe",$"/select,\"{path}\""){UseShellExecute=true}));
+        }
+        catch(Exception ex)
+        {
+            LogService.Error("Не удалось создать резервную копию",ex);
+            if(button is not null)InteractionState.SetStatus(button,InteractionStatus.Error);
+            ToastService.Show(
+                "Резервная копия не создана",
+                "Проверьте свободное место и права записи. Подробности сохранены в журнале.",
+                ToastKind.Error,
+                TimeSpan.FromSeconds(25),
+                "Подробнее",
+                ()=>Dispatcher.BeginInvoke(new Action(()=>MessageBox.Show(Window.GetWindow(this),ex.Message,"Ошибка резервного копирования",MessageBoxButton.OK,MessageBoxImage.Error))));
+        }
+        finally
+        {
+            if(button is not null)
+            {
+                button.Content=previousContent;
+                button.IsEnabled=true;
+                var completedButton=button;
+                _=Dispatcher.InvokeAsync(async()=>{
+                    await Task.Delay(1400);
+                    InteractionState.SetStatus(completedButton,InteractionStatus.Idle);
+                });
+            }
+        }
+    }
 
     private void LoadHotkeys(){var definitions=new[]{("NewDocument","Новый документ","Документы"),("NewFolder","Новая папка","Документы"),("Save","Сохранить","Документы"),("Export","Экспортировать","Документы"),("Settings","Настройки","Интерфейс"),("CloseTab","Закрыть вкладку","Вкладки"),("NextTab","Следующая вкладка","Вкладки"),("PreviousTab","Предыдущая вкладка","Вкладки")};_hotkeys=definitions.Select(x=>new HotkeySetting{Id=x.Item1,Command=x.Item2,Category=x.Item3,Gesture=_settings.Hotkeys.GetValueOrDefault(x.Item1,"")}).ToList();HotkeysGrid.ItemsSource=_hotkeys;}
     private bool ValidateHotkeys(){var converter=new KeyGestureConverter();foreach(var row in _hotkeys){try{if(string.IsNullOrWhiteSpace(row.Gesture)||converter.ConvertFromInvariantString(row.Gesture) is not KeyGesture)throw new FormatException();}catch{MessageBox.Show(Window.GetWindow(this),$"Некорректное сочетание для «{row.Command}»: {row.Gesture}","Горячие клавиши");return false;}}var conflict=_hotkeys.GroupBy(x=>x.Gesture,StringComparer.OrdinalIgnoreCase).FirstOrDefault(x=>x.Count()>1);if(conflict is not null){MessageBox.Show(Window.GetWindow(this),$"Сочетание {conflict.Key} назначено нескольким командам.","Конфликт");return false;}return true;}
     private void HotkeysGrid_CellEditEnding(object sender,DataGridCellEditEndingEventArgs e)=>MarkDirty();
     private void ResetHotkeys_Click(object sender,RoutedEventArgs e){_settings.Hotkeys=new ApplicationSettings().Hotkeys;LoadHotkeys();MarkDirty();}
+    private void SettingsView_SizeChanged(object sender,SizeChangedEventArgs e)
+    {
+        var width=e.NewSize.Width;
+        var showAside=width>=1080;
+        SettingsAside.Visibility=showAside?Visibility.Visible:Visibility.Collapsed;
+        SettingsAsideColumn.Width=showAside?new GridLength(285):new GridLength(0);
+        SettingsAsideGapColumn.Width=showAside?new GridLength(8):new GridLength(0);
+        SettingsNavigationColumn.Width=new GridLength(width<760?190:width<960?208:225);
+    }
     private static long DirectorySize(string path){if(!Directory.Exists(path))return 0;try{return Directory.EnumerateFiles(path,"*",SearchOption.AllDirectories).Sum(x=>{try{return new FileInfo(x).Length;}catch{return 0;}});}catch{return 0;}}
     private static void CopyDataDirectory(string source,string target){Directory.CreateDirectory(target);foreach(var directory in Directory.EnumerateDirectories(source,"*",SearchOption.AllDirectories)){var relative=Path.GetRelativePath(source,directory);if(relative.StartsWith(Path.Combine("Temp","WebView2"),StringComparison.OrdinalIgnoreCase))continue;Directory.CreateDirectory(Path.Combine(target,relative));}foreach(var file in Directory.EnumerateFiles(source,"*",SearchOption.AllDirectories)){var relative=Path.GetRelativePath(source,file);if(relative.StartsWith(Path.Combine("Temp","WebView2"),StringComparison.OrdinalIgnoreCase))continue;var destination=Path.Combine(target,relative);Directory.CreateDirectory(Path.GetDirectoryName(destination)!);using var input=new FileStream(file,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);using var output=new FileStream(destination,FileMode.CreateNew,FileAccess.Write,FileShare.None);input.CopyTo(output);}}
     private static string FormatBytes(long value){string[] units=["Б","КБ","МБ","ГБ","ТБ"];var size=(double)value;var i=0;while(size>=1024&&i<units.Length-1){size/=1024;i++;}return $"{size:0.##} {units[i]}";}

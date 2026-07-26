@@ -1,0 +1,45 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <sys:Double x:Key="Control.Height.Compact">32</sys:Double>
+    <sys:Double x:Key="Control.Height.Default">36</sys:Double>
+    <sys:Double x:Key="Control.Height.Large">40</sys:Double>
+    <sys:Double x:Key="Control.HitArea.Minimum">32</sys:Double>
+    <sys:Double x:Key="Toolbar.Height">44</sys:Double>
+    <sys:Double x:Key="Tab.Height">42</sys:Double>
+    <sys:Double x:Key="Tree.RowHeight">34</sys:Double>
+    <sys:Double x:Key="TitleBar.Height">52</sys:Double>
+    <sys:Double x:Key="Panel.SplitterWidth">6</sys:Double>
+    <sys:Double x:Key="Panel.Library.DefaultWidth">252</sys:Double>
+    <sys:Double x:Key="Panel.Structure.DefaultWidth">224</sys:Double>
+    <sys:Double x:Key="Panel.Properties.DefaultWidth">296</sys:Double>
+    <sys:Double x:Key="Panel.Library.MinWidth">188</sys:Double>
+    <sys:Double x:Key="Panel.Structure.MinWidth">168</sys:Double>
+    <sys:Double x:Key="Panel.Properties.MinWidth">240</sys:Double>
+    <sys:Double x:Key="Editor.MinimumWidth">440</sys:Double>
+
+    <CornerRadius x:Key="Radius.XSmall">3</CornerRadius>
+    <CornerRadius x:Key="Radius.Small">5</CornerRadius>
+    <CornerRadius x:Key="Radius.Medium">8</CornerRadius>
+    <CornerRadius x:Key="Radius.Large">12</CornerRadius>
+    <CornerRadius x:Key="Radius.Pill">999</CornerRadius>
+
+    <Duration x:Key="Motion.Instant">0:0:0</Duration>
+    <Duration x:Key="Motion.Fast">0:0:0.1</Duration>
+    <Duration x:Key="Motion.Normal">0:0:0.18</Duration>
+    <Duration x:Key="Motion.Panel">0:0:0.28</Duration>
+    <Duration x:Key="Motion.Toast">0:0:0.45</Duration>
+
+    <DropShadowEffect x:Key="Shadow.Popup"
+                      BlurRadius="18"
+                      ShadowDepth="5"
+                      Opacity="0.34"
+                      Color="#B0000000"/>
+    <DropShadowEffect x:Key="Shadow.Dialog"
+                      BlurRadius="28"
+                      ShadowDepth="8"
+                      Opacity="0.42"
+                      Color="#C0000000"/>
+</ResourceDictionary>

@@ -12,6 +12,7 @@
     <SelfContained>true</SelfContained>
     <!-- The fixed WebView2 runtime must remain as physical files next to the app. -->
     <PublishSingleFile>false</PublishSingleFile>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />

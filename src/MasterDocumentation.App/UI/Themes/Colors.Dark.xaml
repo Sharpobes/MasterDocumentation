@@ -1,0 +1,54 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <SolidColorBrush x:Key="Background/App" Color="#FF0E151E"/>
+    <SolidColorBrush x:Key="Background/Sidebar" Color="#FF111B26"/>
+    <SolidColorBrush x:Key="Background/Surface" Color="#FF16212D"/>
+    <SolidColorBrush x:Key="Background/SurfaceElevated" Color="#FF1D2A38"/>
+    <SolidColorBrush x:Key="Background/Hover" Color="#FF253343"/>
+    <SolidColorBrush x:Key="Background/Pressed" Color="#FF2D3D4F"/>
+    <SolidColorBrush x:Key="Background/Selected" Color="#FF29364A"/>
+    <SolidColorBrush x:Key="Background/Editor" Color="#FF121C27"/>
+    <SolidColorBrush x:Key="Background/Overlay" Color="#B3000000"/>
+
+    <SolidColorBrush x:Key="Border/Subtle" Color="#FF233140"/>
+    <SolidColorBrush x:Key="Border/Default" Color="#FF334253"/>
+    <SolidColorBrush x:Key="Border/Strong" Color="#FF536276"/>
+    <SolidColorBrush x:Key="Border/Focus" Color="#FFAE8AF5"/>
+
+    <SolidColorBrush x:Key="Text/Primary" Color="#FFE7EBF1"/>
+    <SolidColorBrush x:Key="Text/Secondary" Color="#FFBCC6D3"/>
+    <SolidColorBrush x:Key="Text/Muted" Color="#FF8E9AAA"/>
+    <SolidColorBrush x:Key="Text/Disabled" Color="#FF626E7C"/>
+    <SolidColorBrush x:Key="Text/OnAccent" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="Text/Link" Color="#FF70B7FF"/>
+
+    <SolidColorBrush x:Key="Accent/Primary" Color="#FF8B63D3"/>
+    <SolidColorBrush x:Key="Accent/Hover" Color="#FF9E79E3"/>
+    <SolidColorBrush x:Key="Accent/Pressed" Color="#FF7450B8"/>
+    <SolidColorBrush x:Key="Accent/Soft" Color="#FF2C2541"/>
+
+    <SolidColorBrush x:Key="State/Success" Color="#FF58C98A"/>
+    <SolidColorBrush x:Key="State/SuccessSoft" Color="#FF173629"/>
+    <SolidColorBrush x:Key="State/Warning" Color="#FFE2B85B"/>
+    <SolidColorBrush x:Key="State/WarningSoft" Color="#FF3A301C"/>
+    <SolidColorBrush x:Key="State/Error" Color="#FFF07979"/>
+    <SolidColorBrush x:Key="State/ErrorSoft" Color="#FF41252A"/>
+    <SolidColorBrush x:Key="State/Info" Color="#FF67ACF4"/>
+    <SolidColorBrush x:Key="State/InfoSoft" Color="#FF172F48"/>
+
+    <SolidColorBrush x:Key="WindowBrush" Color="#FF0E151E"/>
+    <SolidColorBrush x:Key="PanelBrush" Color="#FF16212D"/>
+    <SolidColorBrush x:Key="ElevatedPanelBrush" Color="#FF1D2A38"/>
+    <SolidColorBrush x:Key="EditorBackgroundBrush" Color="#FF121C27"/>
+    <SolidColorBrush x:Key="TextBrush" Color="#FFE7EBF1"/>
+    <SolidColorBrush x:Key="MutedTextBrush" Color="#FF8E9AAA"/>
+    <SolidColorBrush x:Key="BorderBrush" Color="#FF334253"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="#FF8B63D3"/>
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#FF9E79E3"/>
+    <SolidColorBrush x:Key="SoftAccentBrush" Color="#FF2C2541"/>
+    <SolidColorBrush x:Key="ButtonSurfaceBrush" Color="#FF1D2A38"/>
+    <SolidColorBrush x:Key="ScrollTrackBrush" Color="#FF111B26"/>
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#FF536276"/>
+</ResourceDictionary>

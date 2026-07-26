@@ -7,6 +7,7 @@ using MasterDocumentation.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Win32;
 using MasterDocumentation.Utilities;
+using MessageBox = MasterDocumentation.Views.MessageBox;
 
 namespace MasterDocumentation;
 

@@ -15,6 +15,7 @@ public partial class TiptapEditor : UserControl
     private readonly Dictionary<string,TaskCompletionSource<EditorContent>> _snapshots=[];
     private Task? _initializationTask;
     private long _contentRequestVersion;
+    private object? _presentationContent;
     public string DataFolder {get;set;}=Path.Combine(AppContext.BaseDirectory,"Data");
     public event EventHandler<EditorContent>? ContentChanged;
     public event EventHandler<JsonElement>? SelectionChanged;
@@ -30,7 +31,7 @@ public partial class TiptapEditor : UserControl
     }
     private async Task InitializeCoreAsync()
     {
-        var runtimeRoot=new[]{Path.Combine(AppContext.BaseDirectory,"FixedRuntime"),Path.Combine(AppContext.BaseDirectory,"WebView2")}.FirstOrDefault(Directory.Exists);string? browserFolder=null;if(runtimeRoot is not null){var exe=Directory.EnumerateFiles(runtimeRoot,"msedgewebview2.exe",SearchOption.AllDirectories).FirstOrDefault();browserFolder=exe is null?null:Path.GetDirectoryName(exe);if(browserFolder is not null)TryGrantRuntimePermissions(browserFolder);}var userData=Path.Combine(DataFolder,"Temp","WebView2");Directory.CreateDirectory(userData);var environment=await CoreWebView2Environment.CreateAsync(browserFolder,userData);await Browser.EnsureCoreWebView2Async(environment);var core=Browser.CoreWebView2!;core.Settings.AreDevToolsEnabled=false;core.Settings.AreDefaultContextMenusEnabled=false;core.Settings.IsStatusBarEnabled=false;core.Settings.IsPasswordAutosaveEnabled=false;core.Settings.IsGeneralAutofillEnabled=false;core.SetVirtualHostNameToFolderMapping("editor.local",Path.Combine(AppContext.BaseDirectory,"Editor"),CoreWebView2HostResourceAccessKind.DenyCors);var assets=Path.Combine(DataFolder,"Assets");Directory.CreateDirectory(assets);core.SetVirtualHostNameToFolderMapping("assets.local",assets,CoreWebView2HostResourceAccessKind.DenyCors);core.NavigationStarting+=(_,e)=>{if(!e.Uri.StartsWith("https://editor.local/",StringComparison.OrdinalIgnoreCase))e.Cancel=true;};core.NewWindowRequested+=(_,e)=>e.Handled=true;core.WebMessageReceived+=OnMessage;core.Navigate("https://editor.local/index.html");
+        var runtimeRoot=new[]{Path.Combine(AppContext.BaseDirectory,"FixedRuntime"),Path.Combine(AppContext.BaseDirectory,"WebView2")}.FirstOrDefault(Directory.Exists);string? browserFolder=null;if(runtimeRoot is not null){var exe=Directory.EnumerateFiles(runtimeRoot,"msedgewebview2.exe",SearchOption.AllDirectories).FirstOrDefault();browserFolder=exe is null?null:Path.GetDirectoryName(exe);if(browserFolder is not null)TryGrantRuntimePermissions(browserFolder);}var userData=Path.Combine(DataFolder,"Temp","WebView2");Directory.CreateDirectory(userData);var environment=await CoreWebView2Environment.CreateAsync(browserFolder,userData);await Browser.EnsureCoreWebView2Async(environment);var core=Browser.CoreWebView2!;try{await core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache);}catch{ }core.Settings.AreDevToolsEnabled=false;core.Settings.AreDefaultContextMenusEnabled=false;core.Settings.IsStatusBarEnabled=false;core.Settings.IsPasswordAutosaveEnabled=false;core.Settings.IsGeneralAutofillEnabled=false;core.SetVirtualHostNameToFolderMapping("editor.local",Path.Combine(AppContext.BaseDirectory,"Editor"),CoreWebView2HostResourceAccessKind.DenyCors);var assets=Path.Combine(DataFolder,"Assets");Directory.CreateDirectory(assets);core.SetVirtualHostNameToFolderMapping("assets.local",assets,CoreWebView2HostResourceAccessKind.DenyCors);core.NavigationStarting+=(_,e)=>{if(!e.Uri.StartsWith("https://editor.local/",StringComparison.OrdinalIgnoreCase))e.Cancel=true;};core.NewWindowRequested+=(_,e)=>e.Handled=true;core.WebMessageReceived+=OnMessage;core.Navigate("https://editor.local/index.html");
     }
     private static void TryGrantRuntimePermissions(string folder)
     {
@@ -59,7 +60,13 @@ public partial class TiptapEditor : UserControl
         var documentId=root.TryGetProperty("documentId",out var id)&&id.TryGetInt64(out var parsed)?parsed:0;
         return new(documentId,root.GetProperty("json").GetRawText(),root.GetProperty("html").GetString()??"",root.GetProperty("text").GetString()??"",headings,initial);
     }
-    public async Task SetContentAsync(long documentId,string? json,string? html=null){var version=Interlocked.Increment(ref _contentRequestVersion);await InitializeAsync();await _ready.Task;if(version!=Volatile.Read(ref _contentRequestVersion))return;object content;if(!string.IsNullOrWhiteSpace(json)){try{content=JsonSerializer.Deserialize<JsonElement>(json);}catch{content=html??"<p></p>";}}else content=html??"<p></p>";Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="setContent",documentId,json=content}));}
+    public async Task SetContentAsync(long documentId,string? json,string? html=null,bool focusEditor=false,string focusPosition="end")
+    {
+        var version=Interlocked.Increment(ref _contentRequestVersion);await InitializeAsync();await _ready.Task;if(version!=Volatile.Read(ref _contentRequestVersion))return;
+        object content;if(!string.IsNullOrWhiteSpace(json)){try{content=JsonSerializer.Deserialize<JsonElement>(json);}catch{content=html??"<p></p>";}}else content=html??"<p></p>";
+        if(focusEditor)Browser.Focus();
+        Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="setContent",documentId,json=content,focus=focusEditor,focusPosition=focusPosition=="start"?"start":"end"}));
+    }
     public async Task<EditorContent> CaptureContentAsync(CancellationToken cancellationToken=default)
     {
         await InitializeAsync();await _ready.Task.WaitAsync(cancellationToken);var requestId=Guid.NewGuid().ToString("N");var completion=new TaskCompletionSource<EditorContent>(TaskCreationOptions.RunContinuationsAsynchronously);_snapshots[requestId]=completion;Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="getContent",requestId}));
@@ -67,4 +74,30 @@ public partial class TiptapEditor : UserControl
     }
     public async Task ExecuteAsync(string name,object? args=null){await InitializeAsync();await _ready.Task;Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="command",name,args=args??new{}}));}
     public async Task PrintAsync(){await InitializeAsync();await _ready.Task;Browser.CoreWebView2.ShowPrintUI(CoreWebView2PrintDialogKind.System);}
+    public void SetBrowserVisible(bool visible)
+    {
+        if(!visible)
+        {
+            Browser.Width=0;
+            Browser.Height=0;
+            Browser.UpdateLayout();
+            Browser.Visibility=Visibility.Collapsed;
+            if(Content is not null)
+            {
+                _presentationContent=Content;
+                Content=null;
+            }
+        }
+        else
+        {
+            if(Content is null&&_presentationContent is not null)
+            {
+                Content=_presentationContent;
+                _presentationContent=null;
+            }
+            Browser.Width=double.NaN;
+            Browser.Height=double.NaN;
+            Browser.Visibility=Visibility.Visible;
+        }
+    }
 }

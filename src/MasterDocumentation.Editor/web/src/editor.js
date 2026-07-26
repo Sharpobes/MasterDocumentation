@@ -109,6 +109,11 @@ const headings = editor => {
 const documentText=editor=>editor.state.doc.textBetween(0,editor.state.doc.content.size,'\n',node=>node.type.name==='formula'?node.attrs.latex:node.type.name==='mermaidDiagram'?`Mermaid:\n${node.attrs.code}`:node.type.name==='safeHtml'?node.attrs.code:node.type.name==='anchor'?node.attrs.name:node.type.name==='pageBreak'?'\n':node.type.name==='image'?node.attrs.alt||'Изображение':'')
 const contentPayload = (editor,type,extra={}) => ({type,documentId:currentDocumentId,json:editor.getJSON(),html:editor.getHTML(),text:documentText(editor),headings:headings(editor),...extra})
 const emitContent = editor => post(contentPayload(editor,'change'))
+let contentFrame=0
+const scheduleContent = editor => {
+  if(contentFrame)return
+  contentFrame=requestAnimationFrame(()=>{contentFrame=0;emitContent(editor)})
+}
 let detectingCode=false
 let copiedFormatting=null
 const updateCodeLanguages=editor=>{
@@ -121,15 +126,151 @@ const updateCodeLanguages=editor=>{
   updates.forEach(x=>{transaction=transaction.setNodeMarkup(x.pos,undefined,{...x.node.attrs,language:x.language})})
   editor.view.dispatch(transaction);detectingCode=false
 }
+const WordLikeEditing=Extension.create({
+  name:'wordLikeEditing',priority:1000,
+  addKeyboardShortcuts(){return{
+    Backspace:()=>{
+      const{empty,$from}=this.editor.state.selection
+      if(!empty||$from.parentOffset!==0)return false
+      const block=$from.parent,alignment=block.attrs.textAlign
+      if(block.type.name==='heading')return this.editor.chain().setParagraph().setTextAlign('left').run()
+      if(block.type.name==='paragraph'&&alignment&&alignment!=='left')return this.editor.chain().setTextAlign('left').run()
+      return false
+    }
+  }}
+})
+let updateContextUi=()=>{}
 const editor = new Editor({
   element: document.querySelector('#editor'),
   extensions: [StarterKit.configure({codeBlock:false,heading:{levels:[1,2,3,4,5,6]}}), Underline, Highlight.configure({multicolor:true}), TextStyle,AdvancedTextStyle,ParagraphLayout,ListOptions, FontFamily, FontSize, LineHeight, Color,
     TextAlign.configure({types:['heading','paragraph']}), Link.configure({openOnClick:false,autolink:true,linkOnPaste:true,protocols:['masterdoc']}), SmartImage,
-    SmartCodeBlock,Table.configure({resizable:true}), TableRow, TableHeader, TableCell, TaskList, TaskItem.configure({nested:true}), Subscript, Superscript,Spoiler,Callout,Collapsible,PageBreak,Anchor,SafeHtml,Formula,MermaidDiagram],
+    SmartCodeBlock,Table.configure({resizable:true}), TableRow, TableHeader, TableCell, TaskList, TaskItem.configure({nested:true}), Subscript, Superscript,Spoiler,Callout,Collapsible,PageBreak,Anchor,SafeHtml,Formula,MermaidDiagram,WordLikeEditing],
   content: '<p></p>', autofocus: true,
-  onUpdate: ({editor}) => {emitContent(editor);setTimeout(()=>updateCodeLanguages(editor),0)},
-  onSelectionUpdate: ({editor}) => {const selected=editor.state.selection.node?.type.name==='image'?editor.state.selection.node.attrs:null,block=editor.state.selection.$from.parent.attrs,textStyle=editor.getAttributes('textStyle');post({type:'selection',bold:editor.isActive('bold'),italic:editor.isActive('italic'),underline:editor.isActive('underline'),strike:editor.isActive('strike'),code:editor.isActive('code'),blockquote:editor.isActive('blockquote'),heading:editor.getAttributes('heading').level||0,fontFamily:textStyle.fontFamily||'',fontSize:textStyle.fontSize||'',letterSpacing:textStyle.letterSpacing??null,spaceBefore:block.spaceBefore??null,spaceAfter:block.spaceAfter??null,firstIndent:block.firstIndent??null,leftIndent:block.leftIndent??null,rightIndent:block.rightIndent??null,textDirection:block.textDirection||'ltr',imageSelected:Boolean(selected),imageSrc:selected?.src||'',imageAlt:selected?.alt||'',imageCaption:selected?.caption||'',imageWrap:selected?.wrap||'none',imageAlign:selected?.align||'center',imageRotation:Number(selected?.rotation)||0})}
+  onUpdate: ({editor}) => {scheduleContent(editor);setTimeout(()=>updateCodeLanguages(editor),0);requestAnimationFrame(()=>updateContextUi(editor))},
+  onSelectionUpdate: ({editor}) => {const selected=editor.state.selection.node?.type.name==='image'?editor.state.selection.node.attrs:null,block=editor.state.selection.$from.parent.attrs,textStyle=editor.getAttributes('textStyle');post({type:'selection',position:editor.state.selection.from,bold:editor.isActive('bold'),italic:editor.isActive('italic'),underline:editor.isActive('underline'),strike:editor.isActive('strike'),code:editor.isActive('code'),blockquote:editor.isActive('blockquote'),heading:editor.getAttributes('heading').level||0,fontFamily:textStyle.fontFamily||'',fontSize:textStyle.fontSize||'',letterSpacing:textStyle.letterSpacing??null,spaceBefore:block.spaceBefore??null,spaceAfter:block.spaceAfter??null,firstIndent:block.firstIndent??null,leftIndent:block.leftIndent??null,rightIndent:block.rightIndent??null,textDirection:block.textDirection||'ltr',imageSelected:Boolean(selected),imageSrc:selected?.src||'',imageAlt:selected?.alt||'',imageCaption:selected?.caption||'',imageWrap:selected?.wrap||'none',imageAlign:selected?.align||'center',imageRotation:Number(selected?.rotation)||0});requestAnimationFrame(()=>updateContextUi(editor))}
 })
+
+const createEditorPopup=(className,role,label)=>{
+  const popup=document.createElement('div')
+  popup.className=className
+  popup.setAttribute('role',role)
+  popup.setAttribute('aria-label',label)
+  popup.hidden=true
+  document.body.append(popup)
+  return popup
+}
+const selectionToolbar=createEditorPopup('selection-toolbar','toolbar','Форматирование выделенного текста')
+const slashMenu=createEditorPopup('slash-menu','listbox','Вставка блока')
+const toolbarActions=[
+  ['B','Полужирный (Ctrl+B)',()=>editor.chain().focus().toggleBold().run(),'bold'],
+  ['I','Курсив (Ctrl+I)',()=>editor.chain().focus().toggleItalic().run(),'italic'],
+  ['U','Подчёркивание (Ctrl+U)',()=>editor.chain().focus().toggleUnderline().run(),'underline'],
+  ['S','Зачёркивание',()=>editor.chain().focus().toggleStrike().run(),'strike'],
+  ['</>','Моноширинный текст',()=>editor.chain().focus().toggleCode().run(),'code']
+]
+toolbarActions.forEach(([label,title,action,mark])=>{
+  const button=document.createElement('button')
+  button.type='button'
+  button.textContent=label
+  button.title=title
+  button.setAttribute('aria-label',title)
+  button.addEventListener('mousedown',event=>{event.preventDefault();action();requestAnimationFrame(()=>updateContextUi(editor))})
+  button.dataset.mark=mark
+  selectionToolbar.append(button)
+})
+const slashActions=[
+  {label:'Обычный текст',hint:'Абзац',keywords:'paragraph текст',run:()=>editor.chain().focus().setParagraph().run()},
+  {label:'Заголовок 1',hint:'Крупный раздел',keywords:'heading h1 заголовок',run:()=>editor.chain().focus().setHeading({level:1}).run()},
+  {label:'Заголовок 2',hint:'Подраздел',keywords:'heading h2 заголовок',run:()=>editor.chain().focus().setHeading({level:2}).run()},
+  {label:'Маркированный список',hint:'Список с маркерами',keywords:'bullet list список',run:()=>editor.chain().focus().toggleBulletList().run()},
+  {label:'Нумерованный список',hint:'Список с номерами',keywords:'number list список',run:()=>editor.chain().focus().toggleOrderedList().run()},
+  {label:'Чек-лист',hint:'Список задач',keywords:'task checklist задачи',run:()=>editor.chain().focus().toggleTaskList().run()},
+  {label:'Цитата',hint:'Выделенный блок',keywords:'quote цитата',run:()=>editor.chain().focus().toggleBlockquote().run()},
+  {label:'Блок кода',hint:'Автоопределение языка',keywords:'code код',run:()=>editor.chain().focus().toggleCodeBlock({autoDetect:true}).run()},
+  {label:'Таблица',hint:'3 × 3',keywords:'table таблица',run:()=>editor.chain().focus().insertTable({rows:3,cols:3,withHeaderRow:true}).run()},
+  {label:'Примечание',hint:'Информационный блок',keywords:'callout note заметка',run:()=>editor.chain().focus().wrapIn('callout',{kind:'info',label:'Примечание'}).run()},
+  {label:'Разделитель',hint:'Горизонтальная линия',keywords:'line rule линия',run:()=>editor.chain().focus().setHorizontalRule().run()}
+]
+let slashFiltered=[]
+let slashIndex=0
+const hideContextPopups=()=>{selectionToolbar.hidden=true;slashMenu.hidden=true}
+const positionPopup=(popup,rect,above=false)=>{
+  popup.hidden=false
+  const bounds=popup.getBoundingClientRect()
+  const left=Math.max(8,Math.min(window.innerWidth-bounds.width-8,rect.left+(rect.width-bounds.width)/2))
+  const preferred=above?rect.top-bounds.height-8:rect.bottom+8
+  const top=Math.max(8,Math.min(window.innerHeight-bounds.height-8,preferred))
+  popup.style.left=`${left}px`
+  popup.style.top=`${top}px`
+}
+const runSlashAction=item=>{
+  const {$from}=editor.state.selection
+  const start=$from.start()
+  editor.chain().focus().deleteRange({from:start,to:$from.pos}).run()
+  item.run()
+  slashMenu.hidden=true
+}
+const renderSlashMenu=(query,rect)=>{
+  const normalized=query.trim().toLocaleLowerCase()
+  slashFiltered=slashActions.filter(item=>!normalized||`${item.label} ${item.hint} ${item.keywords}`.toLocaleLowerCase().includes(normalized)).slice(0,8)
+  slashIndex=Math.min(slashIndex,Math.max(0,slashFiltered.length-1))
+  slashMenu.replaceChildren()
+  if(!slashFiltered.length){
+    const empty=document.createElement('div')
+    empty.className='slash-empty'
+    empty.textContent='Команды не найдены'
+    slashMenu.append(empty)
+  }else slashFiltered.forEach((item,index)=>{
+    const button=document.createElement('button')
+    button.type='button'
+    button.className=index===slashIndex?'selected':''
+    button.setAttribute('role','option')
+    button.setAttribute('aria-selected',String(index===slashIndex))
+    button.innerHTML=`<span>${item.label}</span><small>${item.hint}</small>`
+    button.addEventListener('mousedown',event=>{event.preventDefault();runSlashAction(item)})
+    slashMenu.append(button)
+  })
+  positionPopup(slashMenu,rect)
+}
+updateContextUi=currentEditor=>{
+  if(!currentEditor.isFocused){hideContextPopups();return}
+  const {selection}=currentEditor.state
+  const {$from,empty}=selection
+  const parentText=$from.parent.textBetween(0,$from.parentOffset)
+  const slash=empty&&$from.parent.type.name==='paragraph'?parentText.match(/^\/([^/\n]*)$/):null
+  if(slash){
+    selectionToolbar.hidden=true
+    const caret=currentEditor.view.coordsAtPos($from.pos)
+    renderSlashMenu(slash[1],{left:caret.left,right:caret.right,top:caret.top,bottom:caret.bottom,width:0,height:caret.bottom-caret.top})
+    return
+  }
+  slashMenu.hidden=true
+  if(empty||selection.node){selectionToolbar.hidden=true;return}
+  const nativeSelection=window.getSelection()
+  if(!nativeSelection?.rangeCount){selectionToolbar.hidden=true;return}
+  const rect=nativeSelection.getRangeAt(0).getBoundingClientRect()
+  if(!rect.width&&!rect.height){selectionToolbar.hidden=true;return}
+  selectionToolbar.querySelectorAll('button[data-mark]').forEach(button=>button.classList.toggle('active',currentEditor.isActive(button.dataset.mark)))
+  positionPopup(selectionToolbar,rect,true)
+}
+editor.view.dom.addEventListener('keydown',event=>{
+  if(slashMenu.hidden)return
+  if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+    event.preventDefault()
+    const delta=event.key==='ArrowDown'?1:-1
+    slashIndex=(slashIndex+delta+slashFiltered.length)%Math.max(1,slashFiltered.length)
+    requestAnimationFrame(()=>updateContextUi(editor))
+  }else if(event.key==='Enter'&&slashFiltered.length){
+    event.preventDefault()
+    runSlashAction(slashFiltered[slashIndex])
+  }else if(event.key==='Escape'){
+    event.preventDefault()
+    slashMenu.hidden=true
+  }
+})
+editor.view.dom.addEventListener('blur',()=>setTimeout(()=>{if(!selectionToolbar.matches(':hover')&&!slashMenu.matches(':hover'))hideContextPopups()},120))
+window.addEventListener('resize',()=>updateContextUi(editor))
+window.addEventListener('scroll',()=>updateContextUi(editor),true)
 const transferFiles=files=>Array.from(files||[]).forEach(file=>{const reader=new FileReader();reader.onload=()=>post({type:'fileData',documentId:currentDocumentId,name:file.name||`clipboard-${Date.now()}.png`,mime:file.type||'application/octet-stream',data:String(reader.result||'')});reader.readAsDataURL(file)})
 editor.view.dom.addEventListener('paste',event=>{const files=event.clipboardData?.files;if(files?.length){event.preventDefault();transferFiles(files)}})
 editor.view.dom.addEventListener('dragover',event=>{if(event.dataTransfer?.types?.includes('Files'))event.preventDefault()})
@@ -140,6 +281,7 @@ const paragraphAttributes=args=>({spaceBefore:finiteOrNull(args.spaceBefore),spa
 const copyCurrentFormatting=()=>{const state=editor.state,marks=state.selection.$from.marks().filter(mark=>mark.type.name!=='link'&&mark.type.name!=='spoiler').map(mark=>({type:mark.type.name,attrs:{...mark.attrs}})),block=state.selection.$from.parent;copiedFormatting={marks,blockAttrs:{textAlign:block.attrs.textAlign??null,lineHeight:block.attrs.lineHeight??null,spaceBefore:block.attrs.spaceBefore??null,spaceAfter:block.attrs.spaceAfter??null,firstIndent:block.attrs.firstIndent??null,leftIndent:block.attrs.leftIndent??null,rightIndent:block.attrs.rightIndent??null,textDirection:block.attrs.textDirection??null}};return true}
 const applyCopiedFormatting=()=>{if(!copiedFormatting)return false;const{state,view}=editor,{from,to}=state.selection;if(from===to)return false;let transaction=state.tr.removeMark(from,to);state.doc.nodesBetween(from,to,(node,pos)=>{if(node.isText){const start=Math.max(from,pos),end=Math.min(to,pos+node.nodeSize);for(const saved of copiedFormatting.marks){const type=state.schema.marks[saved.type];if(type&&start<end)transaction=transaction.addMark(start,end,type.create(saved.attrs))}}else if((node.type.name==='paragraph'||node.type.name==='heading')&&pos>=0){transaction=transaction.setNodeMarkup(pos,undefined,{...node.attrs,...copiedFormatting.blockAttrs})}});view.dispatch(transaction);view.focus();return true}
 const commands = {
+  focus:a=>editor.commands.focus(a.position==='start'?'start':'end'),
   bold:()=>editor.chain().focus().toggleBold().run(), italic:()=>editor.chain().focus().toggleItalic().run(), underline:()=>editor.chain().focus().toggleUnderline().run(), strike:()=>editor.chain().focus().toggleStrike().run(),
   bulletList:()=>editor.chain().focus().toggleBulletList().run(), orderedList:()=>editor.chain().focus().toggleOrderedList().run(), taskList:()=>editor.chain().focus().toggleTaskList().run(),
   indent:()=>editor.isActive('taskItem')?editor.chain().focus().sinkListItem('taskItem').run():editor.chain().focus().sinkListItem('listItem').run(),outdent:()=>editor.isActive('taskItem')?editor.chain().focus().liftListItem('taskItem').run():editor.chain().focus().liftListItem('listItem').run(),
@@ -187,8 +329,9 @@ window.chrome?.webview?.addEventListener('message', event => {
   const m=event.data
   if(m.type==='setContent') {
     currentDocumentId=Number(m.documentId)||0
+    if(contentFrame){cancelAnimationFrame(contentFrame);contentFrame=0}
     editor.commands.setContent(m.json||m.html||'<p></p>',{emitUpdate:false})
-    editor.commands.focus('end')
+    if(m.focus){editor.view.dom.focus({preventScroll:true});editor.commands.focus(m.focusPosition==='start'?'start':'end')}
     post(contentPayload(editor,'loaded'))
   } else if(m.type==='getContent') {
     post(contentPayload(editor,'snapshot',{requestId:m.requestId}))
