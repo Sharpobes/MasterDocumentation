@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><RootNamespace>MasterDocumentation</RootNamespace></PropertyGroup>
   <ItemGroup><ProjectReference Include="..\MasterDocumentation.Core\MasterDocumentation.Core.csproj"/></ItemGroup>
-  <ItemGroup><PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9"/><PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3"/></ItemGroup>
+  <ItemGroup><PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9"/><PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3"/><PackageReference Include="Npgsql" Version="8.0.3"/><PackageReference Include="Dapper" Version="2.1.35"/></ItemGroup>
 </Project>

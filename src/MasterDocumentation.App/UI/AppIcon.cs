@@ -15,7 +15,7 @@ public enum AppIconKind
     Error, Success, Delete, ZoomIn, ZoomOut, AlignLeft, AlignCenter, AlignRight, AlignJustify,
     ListBullet, ListNumbered, Checklist, RotateLeft, RotateRight, Crop, Compress, Replace,
     OpenExternal, WrapLeft, WrapRight, NoWrap, Caption, AltText, Indent, Outdent,
-    Subscript, Superscript, ClearFormatting, HorizontalRule, Spoiler, Minus
+    Subscript, Superscript, ClearFormatting, HorizontalRule, Spoiler, Minus, Calculator
 }
 
 public sealed class AppIcon : FrameworkElement

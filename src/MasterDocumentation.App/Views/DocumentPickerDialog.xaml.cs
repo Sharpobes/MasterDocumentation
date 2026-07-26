@@ -34,7 +34,9 @@ public partial class DocumentPickerDialog : Window
     private void Search_Changed(object sender,TextChangedEventArgs e)
     {
         var query=SearchBox.Text.Trim();
-        DocumentsList.ItemsSource=string.IsNullOrEmpty(query)?_items:_items.Where(x=>x.Display.Contains(query,StringComparison.CurrentCultureIgnoreCase)).ToList();
+        var filtered=string.IsNullOrEmpty(query)?_items:_items.Where(x=>x.Display.Contains(query,StringComparison.CurrentCultureIgnoreCase)).ToList();
+        DocumentsList.ItemsSource=filtered;
+        DocumentsEmptyState.Visibility=filtered.Count==0?Visibility.Visible:Visibility.Collapsed;
     }
 
     private void Select_Click(object sender,RoutedEventArgs e){if(SelectedDocument is null){MessageBox.Show(this,"Выберите документ.");return;}DialogResult=true;}

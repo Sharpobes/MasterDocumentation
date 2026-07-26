@@ -21,6 +21,7 @@
                 <ResourceDictionary Source="/MasterDocumentation;component/UI/Themes/Controls.Editor.xaml"/>
             </ResourceDictionary.MergedDictionaries>
             <local:NodeIconConverter x:Key="NodeIconConverter"/>
+            <local:CountToVisibilityConverter x:Key="CountToVisibilityConverter"/>
             <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
         </ResourceDictionary>
     </Application.Resources>

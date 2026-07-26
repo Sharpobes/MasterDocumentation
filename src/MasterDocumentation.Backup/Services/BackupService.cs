@@ -2,17 +2,33 @@ using System.IO.Compression;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text.Json;
+using MasterDocumentation.Models;
 using MasterDocumentation.Storage;
 using MasterDocumentation.Utilities;
 
 namespace MasterDocumentation.Services;
 
+/// <summary>
+/// Резервное копирование двух видов, в зависимости от активного провайдера хранения
+/// (см. <see cref="StorageConfigService"/>):
+///  - файловый (SQLite, по умолчанию) — как раньше, копия файла БД + папки Assets;
+///  - логический (любой другой провайдер, например PostgreSQL) — дерево документов
+///    выгружается через <see cref="IDocumentStore"/> в JSON (logical-dump.json) и может быть
+///    восстановлено в АКТИВНЫЙ на момент восстановления провайдер, каким бы он ни был —
+///    в этом смысле логическая копия переносима между провайдерами, в отличие от файловой.
+/// Ограничения логической копии: история версий документов и общий реестр Settings
+/// (ключ-значение) не включаются — переносится текущее состояние дерева и содержимого.
+/// </summary>
 public sealed class BackupService(DatabaseService database)
 {
     private static readonly byte[] EncryptedMagic = "MDBKENC1"u8.ToArray();
+    private sealed record BackupAttachment(string FileName, string StoredName, string MimeType, long Size, string Sha256);
+    private sealed record BackupNode(string Title, bool IsFolder, bool IsFavorite, bool IsTemplate, string Status, string EditorJson, string Html, string PlainText, double Zoom, List<string> Tags, List<CustomPropertyValue> Properties, List<BackupAttachment> Attachments, List<BackupNode> Children);
+
     public string CreateBackup(bool automatic, string? password = null)
     {
         AppPaths.Ensure(); database.Checkpoint();
+        var fileBased = StorageConfigService.Load().Provider == StorageProviderKind.Sqlite;
         var prefix = automatic ? "auto" : "manual";
         var target = Path.Combine(AppPaths.Backups, $"{prefix}-{DateTime.Now:yyyyMMdd-HHmmss}.mdbackup");
         var temp = target + ".zip.tmp";
@@ -22,10 +38,11 @@ public sealed class BackupService(DatabaseService database)
             using (var archive = ZipFile.Open(temp, ZipArchiveMode.Create))
             {
                 var checksums = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                AddFile(archive, AppPaths.Database, "masterdocumentation.db", checksums); AddDirectory(archive, AppPaths.Assets, "assets", checksums);
+                if (fileBased) AddFile(archive, AppPaths.Database, "masterdocumentation.db", checksums); else WriteLogicalDump(archive, checksums);
+                AddDirectory(archive, AppPaths.Assets, "assets", checksums);
                 WriteJson(archive, "settings-export.json", new SettingsService().Load());
                 WriteJson(archive, "checksum.json", checksums);
-                WriteJson(archive, "manifest.json", new { formatVersion = 1, applicationVersion = typeof(BackupService).Assembly.GetName().Version?.ToString(), createdAt = DateTime.UtcNow, documents = database.CountDocuments(), attachments = Directory.EnumerateFiles(AppPaths.Assets, "*", SearchOption.AllDirectories).LongCount(), size = new FileInfo(AppPaths.Database).Length + DirectorySize(AppPaths.Assets), encrypted = !string.IsNullOrEmpty(password) });
+                WriteJson(archive, "manifest.json", new { formatVersion = 1, applicationVersion = typeof(BackupService).Assembly.GetName().Version?.ToString(), createdAt = DateTime.UtcNow, documents = database.CountDocuments(), attachments = Directory.EnumerateFiles(AppPaths.Assets, "*", SearchOption.AllDirectories).LongCount(), size = (fileBased ? new FileInfo(AppPaths.Database).Length : 0) + DirectorySize(AppPaths.Assets), encrypted = !string.IsNullOrEmpty(password), logical = !fileBased });
             }
             if(string.IsNullOrEmpty(password))File.Move(temp,target,true);else{EncryptFile(temp,target,password);File.Delete(temp);}
         }
@@ -34,32 +51,92 @@ public sealed class BackupService(DatabaseService database)
         LogService.Info($"Создана резервная копия {target}"); return target;
     }
 
+    private void WriteLogicalDump(ZipArchive archive, Dictionary<string, string> checksums)
+    {
+        var tree = database.LoadTree();
+        var favorites = database.LoadFavorites().Select(x => x.Id).ToHashSet();
+        var templates = database.LoadTemplates().Select(x => x.Id).ToHashSet();
+        var nodes = tree.Select(root => BuildBackupNode(root, favorites, templates)).ToList();
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(nodes, new JsonSerializerOptions { WriteIndented = true });
+        var entry = archive.CreateEntry("logical-dump.json", CompressionLevel.Optimal);
+        using (var stream = entry.Open()) stream.Write(bytes);
+        checksums["logical-dump.json"] = Convert.ToHexString(SHA256.HashData(bytes));
+    }
+
+    private BackupNode BuildBackupNode(NodeItem node, HashSet<long> favorites, HashSet<long> templates)
+    {
+        if (node.IsFolder)
+            return new BackupNode(node.Title, true, false, false, "", "", "", "", 1, [], [], [], node.Children.Select(child => BuildBackupNode(child, favorites, templates)).ToList());
+        var (json, html, plainText) = database.LoadStructuredContent(node.Id);
+        var attachments = database.GetAttachments(node.Id).Select(a => new BackupAttachment(a.FileName, a.StoredName, a.MimeType, a.Size, a.Sha256)).ToList();
+        return new BackupNode(node.Title, false, favorites.Contains(node.Id), templates.Contains(node.Id), database.GetStatus(node.Id), json, html, plainText, database.GetZoom(node.Id), database.GetTags(node.Id).ToList(), database.GetCustomProperties(node.Id).ToList(), attachments, []);
+    }
+
+    private void RestoreLogicalDump(string dumpPath)
+    {
+        var nodes = JsonSerializer.Deserialize<List<BackupNode>>(File.ReadAllText(dumpPath)) ?? [];
+        foreach (var root in database.LoadTree().ToList()) database.DeletePermanently(root.Id);
+        database.EmptyTrash();
+        void Import(BackupNode node, long? parentId)
+        {
+            var id = database.Create(parentId, node.IsFolder, node.Title);
+            if (!node.IsFolder)
+            {
+                database.SaveStructuredContent(id, node.EditorJson, node.Html, node.PlainText);
+                database.SetStatus(id, string.IsNullOrWhiteSpace(node.Status) ? "Черновик" : node.Status);
+                database.SetTags(id, node.Tags);
+                database.SetCustomProperties(id, node.Properties);
+                database.SetZoom(id, node.Zoom);
+                foreach (var attachment in node.Attachments) database.RegisterAttachment(id, attachment.FileName, attachment.StoredName, attachment.MimeType, attachment.Size, attachment.Sha256);
+                if (node.IsFavorite) database.ToggleFavorite(id);
+                if (node.IsTemplate) database.SetTemplate(id, true);
+            }
+            foreach (var child in node.Children) Import(child, id);
+        }
+        foreach (var root in nodes) Import(root, null);
+        database.RebuildSearchIndex();
+    }
+
     public static bool IsEncrypted(string path){using var stream=File.OpenRead(path);if(stream.Length<EncryptedMagic.Length)return false;Span<byte> magic=stackalloc byte[EncryptedMagic.Length];stream.ReadExactly(magic);return magic.SequenceEqual(EncryptedMagic);}
     public void Restore(string archivePath,string? password=null)
     {
         string? decrypted=null;var zipPath=archivePath;if(IsEncrypted(archivePath)){if(string.IsNullOrEmpty(password))throw new UnauthorizedAccessException("Для резервной копии требуется пароль.");decrypted=Path.Combine(Path.GetTempPath(),"MasterDocumentation-"+Guid.NewGuid()+".zip");DecryptFile(archivePath,decrypted,password);zipPath=decrypted;}
         try{
+        bool logical;
         using (var test = ZipFile.OpenRead(zipPath))
         {
             var dbEntry = test.GetEntry("masterdocumentation.db") ?? test.GetEntry("Data/master-documentation.db");
-            if ((test.GetEntry("manifest.json") is null && test.GetEntry("manifest.txt") is null) || dbEntry is null)
+            var dumpEntry = test.GetEntry("logical-dump.json");
+            if ((test.GetEntry("manifest.json") is null && test.GetEntry("manifest.txt") is null) || (dbEntry is null && dumpEntry is null))
                 throw new InvalidDataException("Архив не является резервной копией MasterDocumentation.");
+            logical = dumpEntry is not null;
             if (test.Entries.Any(e => e.FullName.Contains("..") || Path.IsPathRooted(e.FullName))) throw new InvalidDataException("Архив содержит небезопасные пути.");
             var checksumEntry = test.GetEntry("checksum.json"); if (checksumEntry is not null) VerifyChecksums(test, checksumEntry);
         }
+        if (!logical && StorageConfigService.Load().Provider != StorageProviderKind.Sqlite)
+            throw new InvalidOperationException("Эта резервная копия — файл SQLite, а активный провайдер хранения сейчас другой. Используйте копию, созданную в текущем режиме хранения, либо переключитесь на SQLite перед восстановлением.");
         CreateBackup(false); database.Checkpoint();
         var staging = Path.Combine(Path.GetTempPath(), "MasterDocumentation-Restore-" + Guid.NewGuid());
         Directory.CreateDirectory(staging);
         try
         {
             ZipFile.ExtractToDirectory(zipPath, staging);
-            var restoredData = Directory.Exists(Path.Combine(staging, "Data")) ? Path.Combine(staging, "Data") : staging;
-            var dbTemp = AppPaths.Database + ".restore";
-            var restoredDb = File.Exists(Path.Combine(restoredData, "masterdocumentation.db")) ? Path.Combine(restoredData, "masterdocumentation.db") : Path.Combine(restoredData, "master-documentation.db");
-            File.Copy(restoredDb, dbTemp, true);
-            File.Move(dbTemp, AppPaths.Database, true);
-            var restoredAssets = Directory.Exists(Path.Combine(restoredData, "assets")) ? Path.Combine(restoredData, "assets") : Path.Combine(restoredData, "Assets");
-            if (Directory.Exists(restoredAssets)) CopyDirectory(restoredAssets, AppPaths.Assets);
+            if (logical)
+            {
+                RestoreLogicalDump(Path.Combine(staging, "logical-dump.json"));
+                var restoredAssetsLogical = Directory.Exists(Path.Combine(staging, "assets")) ? Path.Combine(staging, "assets") : Path.Combine(staging, "Assets");
+                if (Directory.Exists(restoredAssetsLogical)) CopyDirectory(restoredAssetsLogical, AppPaths.Assets);
+            }
+            else
+            {
+                var restoredData = Directory.Exists(Path.Combine(staging, "Data")) ? Path.Combine(staging, "Data") : staging;
+                var dbTemp = AppPaths.Database + ".restore";
+                var restoredDb = File.Exists(Path.Combine(restoredData, "masterdocumentation.db")) ? Path.Combine(restoredData, "masterdocumentation.db") : Path.Combine(restoredData, "master-documentation.db");
+                File.Copy(restoredDb, dbTemp, true);
+                File.Move(dbTemp, AppPaths.Database, true);
+                var restoredAssets = Directory.Exists(Path.Combine(restoredData, "assets")) ? Path.Combine(restoredData, "assets") : Path.Combine(restoredData, "Assets");
+                if (Directory.Exists(restoredAssets)) CopyDirectory(restoredAssets, AppPaths.Assets);
+            }
             LogService.Info($"Восстановлено из {archivePath}");
         }
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }

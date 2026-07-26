@@ -361,6 +361,16 @@ public partial class MainWindow : Window
         if ((sender as FrameworkElement)?.DataContext is not DocumentTab tab) return;CloseTab(tab);e.Handled = true;
     }
     private void CloseTab(DocumentTab tab){_vm.Save(tab);_vm.Tabs.Remove(tab);if(_vm.SelectedTab==tab)_vm.SelectedTab=_vm.Tabs.LastOrDefault();ShowSelectedTab();}
+    private void TabsOverflow_Click(object sender,RoutedEventArgs e){TabsOverflowPopup.IsOpen=!TabsOverflowPopup.IsOpen;}
+    private void TabsOverflowItem_Click(object sender,RoutedEventArgs e)
+    {
+        if((sender as FrameworkElement)?.Tag is not DocumentTab tab)return;
+        TabsOverflowPopup.IsOpen=false;
+        _vm.SelectedTab=tab;
+        Tabs.SelectedItem=tab;
+        Tabs.ScrollIntoView(tab);
+        ShowSelectedTab(true);
+    }
     private void Editor_TextChanged(object sender, TextChangedEventArgs e) { if (_loading || _highlighting || _vm.SelectedTab is null) return; _vm.SelectedTab.IsDirty = true; _saveTimer.Stop(); _saveTimer.Start(); UpdateDocumentStats(); if (Editor.CaretPosition.Paragraph?.Tag as string == "CodeBlock") { _highlightTimer.Stop(); _highlightTimer.Start(); } }
     private void UpdateDocumentStats() { if (_vm.SelectedTab is null) { DocumentStatsText.Text = "Слов: 0   Символов: 0 / 0 без пробелов"; return; } var text = !string.IsNullOrEmpty(_vm.SelectedTab.PlainText)?_vm.SelectedTab.PlainText:new TextRange(Editor.Document.ContentStart, Editor.Document.ContentEnd).Text.TrimEnd(); var words = Regex.Matches(text, @"[\p{L}\p{N}_]+", RegexOptions.CultureInvariant).Count;var withoutSpaces=text.Count(x=>!char.IsWhiteSpace(x)); DocumentStatsText.Text = $"Слов: {words}   Символов: {text.Length} / {withoutSpaces} без пробелов"; }
     private void ModernEditor_ContentChanged(object? sender,EditorContent content)
@@ -751,7 +761,25 @@ public partial class MainWindow : Window
         if(_settingsService.Load().EncryptManualBackups){var prompt=new PasswordDialog("Пароль для новой резервной копии"){Owner=this};if(prompt.ShowDialog()!=true)return;password=prompt.Value;}
         await RunOperationAsync("Создание резервной копии","Документы и вложения сохраняются в локальный архив.",()=>_vm.Backups.CreateBackup(false,password),"Резервная копия создана");
     }
-    private void Restore_Click(object sender, RoutedEventArgs e) { var d = new OpenFileDialog { Filter = "Резервные копии (*.mdbackup)|*.mdbackup|Старые ZIP-копии (*.zip)|*.zip" }; if (d.ShowDialog(this) != true || MessageBox.Show("Текущие данные будут заменены. Продолжить?", "Восстановление", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return; try { string? password=null;if(BackupService.IsEncrypted(d.FileName)){var prompt=new PasswordDialog("Пароль зашифрованной резервной копии"){Owner=this};if(prompt.ShowDialog()!=true)return;password=prompt.Value;}_vm.SaveAll(); _vm.Backups.Restore(d.FileName,password); MessageBox.Show("Данные восстановлены. Приложение будет закрыто; запустите его снова."); Close(); } catch (Exception ex) { LogService.Error("Ошибка восстановления", ex); MessageBox.Show("Не удалось восстановить: " + ex.Message); } }
+    private async void Restore_Click(object sender, RoutedEventArgs e)
+    {
+        var d = new OpenFileDialog { Filter = "Резервные копии (*.mdbackup)|*.mdbackup|Старые ZIP-копии (*.zip)|*.zip" };
+        if (d.ShowDialog(this) != true || MessageBox.Show("Текущие данные будут заменены. Продолжить?", "Восстановление", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if(OperationOverlay.Visibility==Visibility.Visible)return;
+        try
+        {
+            string? password=null;
+            if(BackupService.IsEncrypted(d.FileName)){var prompt=new PasswordDialog("Пароль зашифрованной резервной копии"){Owner=this};if(prompt.ShowDialog()!=true)return;password=prompt.Value;}
+            _vm.SaveAll();
+            OperationTitle.Text="Восстановление из резервной копии";OperationDescription.Text="Данные заменяются содержимым выбранного архива. Не закрывайте приложение.";OperationOverlay.Visibility=Visibility.Visible;
+            AutomationProperties.SetName(OperationOverlay,OperationTitle.Text);
+            await Task.Run(()=>_vm.Backups.Restore(d.FileName,password));
+            MessageBox.Show("Данные восстановлены. Приложение будет закрыто; запустите его снова.");
+            Close();
+        }
+        catch (Exception ex) { LogService.Error("Ошибка восстановления", ex); MessageBox.Show("Не удалось восстановить: " + ex.Message); }
+        finally { OperationOverlay.Visibility=Visibility.Collapsed; }
+    }
     private async void Export_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog { Title = "Выберите папку экспорта" };
@@ -1110,6 +1138,7 @@ public partial class MainWindow : Window
         if(SettingsHost.Visibility==Visibility.Visible){if(_settingsView?.RequestClose()!=false)HideSettings();return;}
         _vm.SaveAll();
         ModernEditor.SetBrowserVisible(false);ModernEditor.Visibility=Visibility.Collapsed;Editor.Visibility=Visibility.Collapsed;EmptyHint.Visibility=Visibility.Collapsed;
+        TabsOverflowPopup.IsOpen=false;
         _settingsView=new SettingsView(_vm.Database,_vm.Backups,_settingsService);_settingsView.SettingsSaved+=ApplySavedSettings;_settingsView.CloseRequested+=HideSettings;SettingsHost.Content=_settingsView;SettingsHost.Visibility=Visibility.Visible;Tabs.Visibility=Visibility.Collapsed;SettingsTabHeader.Visibility=Visibility.Visible;Dispatcher.BeginInvoke(new Action(UpdateSettingsHostSize));
     }
     private void ApplySavedSettings(ApplicationSettings settings){_settings=settings;ApplyInterfacePreferences(_settings);_saveTimer.Interval=TimeSpan.FromSeconds(_settings.AutoSaveDelaySeconds);_vm.SetTheme(_settings.Theme,false);_=ModernEditor.ExecuteAsync("setTheme",new{theme=_vm.DarkTheme?"dark":"light"});Editor.FontFamily=new FontFamily(_settings.DefaultFont);Editor.FontSize=_settings.DefaultFontSize;Editor.SpellCheck.IsEnabled=_settings.SpellCheck;}

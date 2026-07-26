@@ -20,6 +20,7 @@ public partial class SettingsView : UserControl
     private readonly SettingsService _settingsService;
     private readonly FrameworkElement[] _panels;
     private ApplicationSettings _settings;
+    private StorageProviderConfig _storageConfig=StorageConfigService.Load();
     private List<HotkeySetting> _hotkeys=[];
     private bool _loading=true;
     private bool _dirty;
@@ -37,7 +38,9 @@ public partial class SettingsView : UserControl
     {
         SelectCombo(LanguageBox,_settings.Language);SelectCombo(StartupBox,_settings.StartupBehavior);RecentCountText.Text=_settings.RecentFilesCount.ToString();CompactCheck.IsChecked=_settings.CompactMode;UpdatesCheck.IsChecked=_settings.CheckUpdates;TooltipsCheck.IsChecked=_settings.ShowTooltips;ConfirmDeleteCheck.IsChecked=_settings.ConfirmDelete;SelectCombo(LinkBox,_settings.LinkBehavior);SelectCombo(UnitsBox,_settings.MeasurementUnits);
         DefaultFontBox.SelectedItem=Fonts.SystemFontFamilies.FirstOrDefault(x=>x.Source==_settings.DefaultFont);DefaultFontSizeBox.Text=_settings.DefaultFontSize.ToString();SpellCheckBox.IsChecked=_settings.SpellCheck;AutoSaveDelayBox.Text=_settings.AutoSaveDelaySeconds.ToString();SelectCombo(ThemeBox,_settings.Theme);EncryptionCheck.IsChecked=_settings.EncryptManualBackups;
-        DataPathBox.Text=AppPaths.Data;AssetsPathText.Text=AppPaths.Assets;BackupsPathText.Text=AppPaths.Backups;ExportsPathText.Text=AppPaths.Exports;RuntimeText.Text=$"Версия .NET: {Environment.Version}";AppPathText.Text="Путь приложения: "+AppContext.BaseDirectory;LoadHotkeys();_dirty=false;SaveButton.IsEnabled=false;
+        DataPathBox.Text=AppPaths.Data;AssetsPathText.Text=AppPaths.Assets;BackupsPathText.Text=AppPaths.Backups;ExportsPathText.Text=AppPaths.Exports;RuntimeText.Text=$"Версия .NET: {Environment.Version}";AppPathText.Text="Путь приложения: "+AppContext.BaseDirectory;LoadHotkeys();
+        StorageProviderPostgresRadio.IsChecked=_storageConfig.Provider==StorageProviderKind.Postgres;StorageProviderSqliteRadio.IsChecked=_storageConfig.Provider!=StorageProviderKind.Postgres;PostgresConnectionStringBox.Text=_storageConfig.PostgresConnectionString;PostgresConfigPanel.Visibility=_storageConfig.Provider==StorageProviderKind.Postgres?Visibility.Visible:Visibility.Collapsed;StorageProviderStatusText.Text="";
+        _dirty=false;SaveButton.IsEnabled=false;
     }
 
     private void LoadStatistics()
@@ -111,8 +114,61 @@ public partial class SettingsView : UserControl
         if(!double.TryParse(DefaultFontSizeBox.Text,out var fontSize)||fontSize is <6 or >200){MessageBox.Show(Window.GetWindow(this),"Размер шрифта должен быть от 6 до 200.","Настройки");return false;}
         if(!int.TryParse(AutoSaveDelayBox.Text,out var delay)||delay is <1 or >3600){MessageBox.Show(Window.GetWindow(this),"Задержка автосохранения должна быть от 1 до 3600 секунд.","Настройки");return false;}
         HotkeysGrid.CommitEdit(DataGridEditingUnit.Cell,true);HotkeysGrid.CommitEdit(DataGridEditingUnit.Row,true);if(!ValidateHotkeys())return false;
+        var newProvider=StorageProviderPostgresRadio.IsChecked==true?StorageProviderKind.Postgres:StorageProviderKind.Sqlite;
+        if(newProvider==StorageProviderKind.Postgres&&string.IsNullOrWhiteSpace(PostgresConnectionStringBox.Text)){MessageBox.Show(Window.GetWindow(this),"Укажите строку подключения к PostgreSQL или выберите SQLite.","Настройки");return false;}
+        var providerChanged=newProvider!=_storageConfig.Provider||PostgresConnectionStringBox.Text.Trim()!=_storageConfig.PostgresConnectionString;
         _settings.Language=Selected(LanguageBox);_settings.StartupBehavior=Selected(StartupBox);_settings.RecentFilesCount=int.Parse(RecentCountText.Text);_settings.CompactMode=CompactCheck.IsChecked==true;_settings.CheckUpdates=UpdatesCheck.IsChecked==true;_settings.ShowTooltips=TooltipsCheck.IsChecked==true;_settings.ConfirmDelete=ConfirmDeleteCheck.IsChecked==true;_settings.LinkBehavior=Selected(LinkBox);_settings.MeasurementUnits=Selected(UnitsBox);_settings.DefaultFont=(DefaultFontBox.SelectedItem as FontFamily)?.Source??DefaultFontBox.Text;_settings.DefaultFontSize=fontSize;_settings.SpellCheck=SpellCheckBox.IsChecked==true;_settings.AutoSaveDelaySeconds=delay;_settings.Theme=Selected(ThemeBox);_settings.EncryptManualBackups=EncryptionCheck.IsChecked==true;_settings.Hotkeys=_hotkeys.ToDictionary(x=>x.Id,x=>x.Gesture);
-        _settingsService.Save(_settings);_dirty=false;SaveButton.IsEnabled=false;SettingsSaved?.Invoke(_settings);return true;
+        _settingsService.Save(_settings);
+        _storageConfig=new StorageProviderConfig{Provider=newProvider,PostgresConnectionString=PostgresConnectionStringBox.Text.Trim()};StorageConfigService.Save(_storageConfig);
+        _dirty=false;SaveButton.IsEnabled=false;SettingsSaved?.Invoke(_settings);
+        if(providerChanged)MessageBox.Show(Window.GetWindow(this),"Провайдер хранения изменён. Перезапустите приложение, чтобы изменения вступили в силу.","Хранилище",MessageBoxButton.OK,MessageBoxImage.Information);
+        return true;
+    }
+
+    private void StorageProvider_Changed(object sender,RoutedEventArgs e)
+    {
+        if(PostgresConfigPanel is null)return;
+        PostgresConfigPanel.Visibility=StorageProviderPostgresRadio.IsChecked==true?Visibility.Visible:Visibility.Collapsed;
+        MarkDirty();
+    }
+
+    private void TestConnection_Click(object sender,RoutedEventArgs e)
+    {
+        var config=new StorageProviderConfig{Provider=StorageProviderKind.Postgres,PostgresConnectionString=PostgresConnectionStringBox.Text.Trim()};
+        if(string.IsNullOrWhiteSpace(config.PostgresConnectionString)){StorageProviderStatusText.Text="Укажите строку подключения.";return;}
+        StorageProviderStatusText.Text="Проверка соединения…";
+        var ok=StorageConfigService.TestConnection(config,out var error);
+        StorageProviderStatusText.Text=ok?"Соединение с PostgreSQL успешно установлено.":"Не удалось подключиться: "+error;
+    }
+
+    private async void MigrateToPostgres_Click(object sender,RoutedEventArgs e)
+    {
+        var connectionString=PostgresConnectionStringBox.Text.Trim();
+        if(string.IsNullOrWhiteSpace(connectionString)){StorageProviderStatusText.Text="Укажите строку подключения перед переносом.";return;}
+        if(MessageBox.Show(Window.GetWindow(this),"Перенести текущую документацию (дерево, содержимое, теги, вложения, избранное, шаблоны) в указанную базу PostgreSQL? История версий и общие настройки (Settings) при переносе не копируются.","Перенос данных",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
+        var button=sender as Button;var previousContent=button?.Content;
+        if(button is not null){button.IsEnabled=false;button.Content="Перенос…";}
+        StorageProviderStatusText.Text="Начинается перенос…";
+        try
+        {
+            var progress=new Progress<string>(text=>StorageProviderStatusText.Text=text);
+            await Task.Run(()=>
+            {
+                var source=new SqliteDocumentStore();source.Initialize();
+                var target=new PostgresDocumentStore(connectionString);
+                StorageMigrationService.CopyAll(source,target,progress);
+            });
+            StorageProviderStatusText.Text="Перенос завершён успешно. Выберите PostgreSQL и сохраните настройки, чтобы приложение начало использовать новое хранилище.";
+        }
+        catch(Exception ex)
+        {
+            LogService.Error("Не удалось перенести данные в PostgreSQL",ex);
+            StorageProviderStatusText.Text="Ошибка переноса: "+ex.Message;
+        }
+        finally
+        {
+            if(button is not null){button.IsEnabled=true;button.Content=previousContent;}
+        }
     }
 
     private void Save_Click(object sender,RoutedEventArgs e){if(SaveSettings())CloseRequested?.Invoke();}
