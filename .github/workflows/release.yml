@@ -45,7 +45,18 @@ jobs:
 
       - name: Build, test and package
         shell: pwsh
-        run: .\scripts\build-release.ps1 -Version '${{ steps.version.outputs.value }}'
+        env:
+          SIGNING_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          $arguments = @('-Version', '${{ steps.version.outputs.value }}')
+          # Секреты подписи необязательны: без них выходит неподписанная сборка, как раньше.
+          if ($env:SIGNING_CERTIFICATE) {
+            $pfx = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGNING_CERTIFICATE))
+            $arguments += @('-CertificatePath', $pfx, '-CertificatePassword', $env:SIGNING_PASSWORD)
+          }
+          .\scripts\build-release.ps1 @arguments
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

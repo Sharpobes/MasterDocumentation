@@ -13,6 +13,11 @@ public static class PayloadArchive
 {
     public static readonly byte[] Signature = Encoding.ASCII.GetBytes("MDSETUP1");
     private const int FooterSize = 16;
+    /// <summary>
+    /// Подписанный установщик хранит таблицу сертификатов в конце файла, поэтому метка footer'а
+    /// уже не последние байты: она ищется в хвосте файла с конца.
+    /// </summary>
+    private const int TailSearchSize = 1 << 20;
 
     public static bool Exists => TryReadFooter(out _, out _);
 
@@ -35,16 +40,32 @@ public static class PayloadArchive
         {
             using var file = new FileStream(SetupPath, FileMode.Open, FileAccess.Read, FileShare.Read);
             if (file.Length <= FooterSize) return false;
-            file.Seek(-FooterSize, SeekOrigin.End);
-            var footer = new byte[FooterSize];
-            if (file.Read(footer, 0, FooterSize) != FooterSize) return false;
-            for (var i = 0; i < Signature.Length; i++)
-                if (footer[8 + i] != Signature[i]) return false;
-            length = BitConverter.ToInt64(footer, 0);
-            offset = file.Length - FooterSize - length;
-            return length > 0 && offset > 0;
+            var tailLength = (int)Math.Min(TailSearchSize, file.Length);
+            var tail = new byte[tailLength];
+            file.Seek(-tailLength, SeekOrigin.End);
+            file.ReadExactly(tail);
+            var tailStart = file.Length - tailLength;
+
+            for (var index = tail.Length - Signature.Length; index >= 8; index--)
+            {
+                if (!MatchesSignature(tail, index)) continue;
+                var candidate = BitConverter.ToInt64(tail, index - 8);
+                var start = tailStart + index - 8 - candidate;
+                if (candidate <= 0 || start <= 0) continue;
+                length = candidate;
+                offset = start;
+                return true;
+            }
+            return false;
         }
         catch { return false; }
+    }
+
+    private static bool MatchesSignature(byte[] buffer, int index)
+    {
+        for (var i = 0; i < Signature.Length; i++)
+            if (buffer[index + i] != Signature[i]) return false;
+        return true;
     }
 
     /// <summary>Окно только для чтения внутри файла установщика — ZipArchive требует поток с произвольным доступом.</summary>

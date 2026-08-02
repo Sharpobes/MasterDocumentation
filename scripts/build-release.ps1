@@ -3,7 +3,13 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$')]
     [string]$Version = '1.0.0',
     [switch]$SkipTests,
-    [switch]$SkipInstaller
+    [switch]$SkipInstaller,
+    # Подпись кода: без неё SmartScreen показывает «Система Windows защитила ваш компьютер».
+    # Сертификат задаётся либо PFX-файлом, либо отпечатком уже установленного в хранилище.
+    [string]$CertificatePath,
+    [string]$CertificatePassword,
+    [string]$CertificateThumbprint,
+    [string]$TimestampUrl = 'http://timestamp.digicert.com'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,6 +37,31 @@ function Assert-ArtifactPath([string]$Path) {
     if (-not $candidate.StartsWith($artifactRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to modify a path outside the artifacts directory: $candidate"
     }
+}
+
+function Get-SigningCertificate {
+    if ($script:signingCertificate -ne $null) { return $script:signingCertificate }
+    if ($CertificatePath) {
+        if (-not (Test-Path -LiteralPath $CertificatePath)) { throw "Certificate file was not found: $CertificatePath" }
+        $script:signingCertificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2 @($CertificatePath, $CertificatePassword, 'Exportable,PersistKeySet')
+    }
+    elseif ($CertificateThumbprint) {
+        $found = Get-ChildItem -Path Cert:\CurrentUser\My, Cert:\LocalMachine\My | Where-Object { $_.Thumbprint -eq $CertificateThumbprint }
+        if (-not $found) { throw "Certificate with thumbprint $CertificateThumbprint was not found." }
+        $script:signingCertificate = $found[0]
+    }
+    return $script:signingCertificate
+}
+
+# Подписывается EXE, а не архив: ZIP подписать нельзя, поэтому портативная сборка получает
+# подписанный MasterDocumentation.exe внутри. Установщик подписывается уже вместе с дистрибутивом
+# в конце файла — метка footer'а ищется поиском с конца и переживает таблицу сертификатов.
+function Invoke-CodeSign([string]$Path) {
+    $certificate = Get-SigningCertificate
+    if (-not $certificate) { return }
+    $result = Set-AuthenticodeSignature -FilePath $Path -Certificate $certificate -HashAlgorithm SHA256 -TimestampServer $TimestampUrl
+    if ($result.Status -ne 'Valid') { throw "Signing failed for $Path : $($result.StatusMessage)" }
+    Write-Host "Signed: $Path"
 }
 
 function Write-Sha256([string]$Path) {
@@ -71,6 +102,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $publish 'MasterDocumentation.exe'))
 if (-not (Test-Path -LiteralPath (Join-Path $publish 'Editor\index.html'))) { throw 'Local TipTap editor is missing from publish output.' }
 if (-not (Get-ChildItem -LiteralPath (Join-Path $publish 'WebView2') -Filter 'msedgewebview2.exe' -Recurse -ErrorAction SilentlyContinue)) { throw 'Fixed WebView2 Runtime is missing from publish output.' }
 
+Invoke-CodeSign (Join-Path $publish 'MasterDocumentation.exe')
+
 if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
 # Архив собирается вручную, а не через Compress-Archive/CreateFromDirectory: в Windows PowerShell
 # CreateFromDirectory записывает имена записей с обратными слэшами, из-за чего архив некорректен
@@ -107,6 +140,7 @@ if (-not $SkipInstaller) {
     }
     finally { $output.Dispose() }
 
+    Invoke-CodeSign $installer
     $installerHash = Write-Sha256 $installer
     Remove-Item -LiteralPath $setupStub -Recurse -Force
 }
