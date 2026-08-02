@@ -21,6 +21,7 @@ public interface IDocumentStore
     List<NodeItem> LoadTemplates();
     NodeItem? FindNode(long id);
     long Create(long? parentId, bool folder, string title);
+    long Create(long? parentId, bool folder, string title, bool isPrivate);
     bool TitleExists(long? parentId, string title, long? exceptId = null);
     void Rename(long id, string title);
     void SetTemplate(long id, bool value);
@@ -44,6 +45,21 @@ public interface IDocumentStore
     string GetDocumentPlainText(long documentId);
     double GetZoom(long id);
     void SetZoom(long id, double value);
+
+    // Markdown — канонический формат страницы документации (.md)
+    string GetDocumentMarkdown(long documentId);
+    void SetDocumentMarkdown(long documentId, string markdown);
+
+    // Доступ к странице: приватная видна только владельцу, обычная — всем подключившимся к БД
+    DocumentAccess GetDocumentAccess(long documentId);
+    void SetDocumentAccess(long documentId, bool isPrivate);
+
+    // Двоичное содержимое вложений и изображений (хранится в БД по SHA-256, чтобы картинки
+    // отображались у всех, кто подключён к этой базе, а не только на компьютере автора)
+    void SaveAssetContent(string storedName, string sha256, string mimeType, byte[] data);
+    (byte[] Data, string MimeType)? LoadAssetContent(string storedName);
+    bool AssetExists(string storedName);
+    IReadOnlyList<string> GetReferencedAssetNames(long documentId);
 
     // Настройки и обслуживание хранилища
     string? GetSetting(string key);

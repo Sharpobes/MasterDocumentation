@@ -56,6 +56,16 @@
       <TextBlock x:Name="StorageProviderStatusText" Foreground="{DynamicResource Text/Muted}" TextWrapping="Wrap" Margin="0,10,0,0"/>
      </StackPanel>
      <TextBlock Text="Выбор провайдера применяется после сохранения и перезапуска приложения." Foreground="{DynamicResource Text/Muted}" TextWrapping="Wrap" Margin="0,14,0,0"/>
+     <TextBlock Text="Имя пользователя базы данных" Foreground="{DynamicResource Text/Muted}" Margin="0,22,0,6"/>
+     <TextBox x:Name="StorageUserBox" TextChanged="Control_Changed"/>
+     <TextBlock Text="Под этим именем страницы помечаются как ваши. Приватные страницы видит только их владелец, остальные доступны всем, кто подключился к этой базе через приложение." Foreground="{DynamicResource Text/Muted}" TextWrapping="Wrap" Margin="0,7,0,0"/>
+     <TextBlock Text="Импорт и выгрузка документации" FontSize="16" FontWeight="SemiBold" Margin="0,26,0,8"/>
+     <TextBlock Text="Отдельное окно позволяет выбрать, какие именно локально сохранённые страницы записать в базу данных, и какие страницы забрать из базы в текущее хранилище. Изображения переносятся вместе со страницами." Foreground="{DynamicResource Text/Muted}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+     <Button Content="Открыть окно обмена с базой данных…" HorizontalAlignment="Left" Click="DatabaseTransfer_Click"/>
+     <TextBlock Text="Страницы документации" FontSize="16" FontWeight="SemiBold" Margin="0,26,0,8"/>
+     <TextBlock Text="Каждая страница дополнительно сохраняется на диск в формате Markdown (.md) — их можно читать и версионировать без приложения." Foreground="{DynamicResource Text/Muted}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+     <TextBlock x:Name="DocumentsPathText" TextWrapping="Wrap"/>
+     <Button Content="Открыть папку .md-файлов" HorizontalAlignment="Left" Margin="0,10,0,0" Click="OpenDocuments_Click"/>
     </StackPanel></ScrollViewer>
     <ScrollViewer x:Name="EditorPanel" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock Text="Шрифт по умолчанию" Margin="0,0,0,6"/><ComboBox x:Name="DefaultFontBox" SelectionChanged="Control_Changed"/><TextBlock Text="Размер шрифта" Margin="0,18,0,6"/><TextBox x:Name="DefaultFontSizeBox" TextChanged="Control_Changed"/><CheckBox x:Name="SpellCheckBox" Content="Проверка орфографии" Margin="0,18" Checked="Control_Changed" Unchecked="Control_Changed"/><TextBlock Text="Задержка автосохранения, секунд"/><TextBox x:Name="AutoSaveDelayBox" Margin="0,6,0,0" TextChanged="Control_Changed"/></StackPanel></ScrollViewer>
     <ScrollViewer x:Name="InterfacePanel" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock Text="Тема приложения" Margin="0,0,0,6"/><ComboBox x:Name="ThemeBox" SelectionChanged="Control_Changed"><ComboBoxItem Content="Системная"/><ComboBoxItem Content="Светлая"/><ComboBoxItem Content="Тёмная"/></ComboBox><TextBlock Text="Изменение темы применяется после сохранения." Foreground="{DynamicResource Text/Muted}" Margin="0,10"/></StackPanel></ScrollViewer>

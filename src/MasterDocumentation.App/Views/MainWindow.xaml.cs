@@ -84,7 +84,7 @@ public partial class MainWindow : Window
     private void SectionAddFolder_Click(object sender,RoutedEventArgs e){SectionAddPopup.IsOpen=false;CreateNode(true);}
     private long? CreateNode(bool folder)
     {
-        var roots=_vm.Database.LoadTree();var dialog=new NewItemDialog(roots,_vm.Database.LoadTemplates(),folder,TargetFolder()){Owner=this};if(dialog.ShowDialog()!=true)return null;
+        var roots=_vm.Database.LoadTree();var storage=_vm.Database.ActiveProvider==MasterDocumentation.Storage.StorageProviderKind.Postgres?$"Хранилище: общая база данных PostgreSQL, вы подключены как «{UserIdentity.Current}».":"Хранилище: локальная база. Признак приватности сохранится при выгрузке документа в общую базу данных.";var dialog=new NewItemDialog(roots,_vm.Database.LoadTemplates(),folder,TargetFolder(),storage){Owner=this};if(dialog.ShowDialog()!=true)return null;
         try
         {
             IReadOnlyDictionary<string,string>? values=null;
@@ -93,7 +93,9 @@ public partial class MainWindow : Window
                 var builtIn=new HashSet<string>(["Title","Date","Time","Author","Section"],StringComparer.OrdinalIgnoreCase);var custom=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
                 foreach(var name in _vm.Database.GetTemplateVariables(template).Where(x=>!builtIn.Contains(x))){var prompt=new TextPrompt("Переменная шаблона: "+name,""){Owner=this};if(prompt.ShowDialog()!=true)return null;custom[name]=prompt.Value;}values=custom;
             }
-            var id=dialog.TemplateId is long source?_vm.Database.CreateFromTemplate(source,dialog.ParentId,dialog.ItemTitle,values):_vm.Database.Create(dialog.ParentId,dialog.IsFolder,dialog.ItemTitle);_vm.ReloadTree();UpdateNavigationCounts();if(!dialog.IsFolder){var node=FindNode(_vm.Nodes,id);if(node is not null){_vm.Open(node);ShowSelectedTab(true,"start");}}return id;
+            var id=dialog.TemplateId is long source?_vm.Database.CreateFromTemplate(source,dialog.ParentId,dialog.ItemTitle,values):_vm.Database.Create(dialog.ParentId,dialog.IsFolder,dialog.ItemTitle,dialog.IsPrivate);
+            if(dialog.TemplateId is not null&&dialog.IsPrivate)_vm.Database.SetDocumentAccess(id,true);
+            _vm.ReloadTree();UpdateNavigationCounts();if(!dialog.IsFolder){var node=FindNode(_vm.Nodes,id);if(node is not null){_vm.Open(node);ShowSelectedTab(true,"start");}}return id;
         }
         catch(Exception ex){MessageBox.Show(this,ex.Message,"Не удалось создать",MessageBoxButton.OK,MessageBoxImage.Warning);return null;}
     }
@@ -105,17 +107,64 @@ public partial class MainWindow : Window
             var parent=TargetFolder();var title=UniqueTitle(parent,Path.GetFileNameWithoutExtension(dialog.FileName));var id=_vm.Database.Create(parent,false,title);var extension=Path.GetExtension(dialog.FileName).ToLowerInvariant();string html;string plain;
             if(extension==".pdf") {var asset=StoreAsset(dialog.FileName);_vm.Database.RegisterAttachment(id,Path.GetFileName(dialog.FileName),asset.StoredName,"application/pdf",asset.Size,asset.Hash);plain=$"Вложение PDF: {Path.GetFileName(dialog.FileName)}";html=$"<p>Вложение PDF: <a href=\"https://assets.local/{asset.StoredName}\">{System.Net.WebUtility.HtmlEncode(Path.GetFileName(dialog.FileName))}</a></p>";}
             else if(extension==".docx") (html,plain)=ImportDocx(dialog.FileName);
-            else if(extension is ".md" or ".markdown") {plain=File.ReadAllText(dialog.FileName);html=MarkdownToHtml(plain);}
-            else if(extension is ".html" or ".htm") {html=SanitizeImportedHtml(File.ReadAllText(dialog.FileName));plain=HtmlToPlainText(html);}
+            else if(extension is ".md" or ".markdown") {plain=File.ReadAllText(dialog.FileName);html=ImportInlineImages(MarkdownService.ToHtml(plain),id,Path.GetDirectoryName(Path.GetFullPath(dialog.FileName))!);}
+            else if(extension is ".html" or ".htm") {html=ImportInlineImages(SanitizeImportedHtml(File.ReadAllText(dialog.FileName)),id,Path.GetDirectoryName(Path.GetFullPath(dialog.FileName))!);plain=HtmlToPlainText(html);}
             else if(extension==".rtf") {var document=new FlowDocument();using var stream=File.OpenRead(dialog.FileName);new TextRange(document.ContentStart,document.ContentEnd).Load(stream,DataFormats.Rtf);plain=new TextRange(document.ContentStart,document.ContentEnd).Text.TrimEnd();html="<p>"+System.Net.WebUtility.HtmlEncode(plain).Replace("\r\n","</p><p>").Replace("\n","</p><p>")+"</p>";}
             else {plain=File.ReadAllText(dialog.FileName);html="<p>"+System.Net.WebUtility.HtmlEncode(plain).Replace("\r\n","</p><p>").Replace("\n","</p><p>")+"</p>";}
             _vm.Database.SaveStructuredContent(id,"",html,plain);_vm.ReloadTree();UpdateNavigationCounts();var node=FindNode(_vm.Nodes,id);if(node is not null){_vm.Open(node);ShowSelectedTab();}ToastService.Show("Импорт завершён","Документ добавлен в локальное хранилище.",ToastKind.Success);
         }
         catch(Exception ex){LogService.Error("Ошибка импорта документа",ex);MessageBox.Show(this,"Не удалось импортировать документ: "+ex.Message,"Импорт",MessageBoxButton.OK,MessageBoxImage.Error);}
     }
+    private void DatabaseTransfer_Click(object sender,RoutedEventArgs e)
+    {
+        CreateMenuPopup.IsOpen=false;
+        _vm.SaveAll();
+        var dialog=new DatabaseTransferWindow(_vm.Database){Owner=this};
+        dialog.ShowDialog();
+        if(!dialog.LibraryChanged)return;
+        _navigationMode="all";
+        _vm.ReloadTree();
+        UpdateNavigationCounts();
+        if(_vm.SelectedTab is null)LoadStartPage();
+        ToastService.Show("Импорт из базы данных завершён","Выбранные страницы добавлены в текущее хранилище.",ToastKind.Success);
+    }
     private string UniqueTitle(long? parent,string value){var title=string.IsNullOrWhiteSpace(value)?"Импортированный документ":value.Trim();if(!_vm.Database.TitleExists(parent,title))return title;for(var i=2;;i++){var candidate=$"{title} ({i})";if(!_vm.Database.TitleExists(parent,candidate))return candidate;}}
     private static (string Html,string Plain) ImportDocx(string path){using var document=WordprocessingDocument.Open(path,false);var paragraphs=document.MainDocumentPart?.Document?.Body?.Elements<OpenXmlParagraph>()??[];var html=new System.Text.StringBuilder();var plain=new System.Text.StringBuilder();foreach(var paragraph in paragraphs){var text=paragraph.InnerText;plain.AppendLine(text);var style=paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value??"";var match=Regex.Match(style,@"Heading\s*([1-6])",RegexOptions.IgnoreCase);if(match.Success)html.Append($"<h{match.Groups[1].Value}>{System.Net.WebUtility.HtmlEncode(text)}</h{match.Groups[1].Value}>");else html.Append($"<p>{System.Net.WebUtility.HtmlEncode(text)}</p>");}return(html.ToString(),plain.ToString().TrimEnd());}
-    private static string MarkdownToHtml(string markdown){var result=new System.Text.StringBuilder();var inCode=false;foreach(var raw in markdown.Replace("\r","").Split('\n')){if(raw.TrimStart().StartsWith("```")){result.Append(inCode?"</code></pre>":"<pre><code>");inCode=!inCode;continue;}if(inCode){result.AppendLine(System.Net.WebUtility.HtmlEncode(raw));continue;}var heading=Regex.Match(raw,@"^(#{1,6})\s+(.+)$");if(heading.Success){var level=heading.Groups[1].Value.Length;result.Append($"<h{level}>{System.Net.WebUtility.HtmlEncode(heading.Groups[2].Value)}</h{level}>");continue;}var bullet=Regex.Match(raw,@"^\s*[-*+]\s+(.+)$");if(bullet.Success){result.Append($"<ul><li>{System.Net.WebUtility.HtmlEncode(bullet.Groups[1].Value)}</li></ul>");continue;}result.Append(string.IsNullOrWhiteSpace(raw)?"<p></p>":$"<p>{System.Net.WebUtility.HtmlEncode(raw)}</p>");}if(inCode)result.Append("</code></pre>");return result.ToString();}
+    /// <summary>
+    /// Переносит изображения импортируемого файла в хранилище: файл копируется в папку вложений
+    /// и в базу данных, а ссылка в содержимом заменяется на адрес вложения — иначе на странице
+    /// осталась бы лишь ссылка на локальный путь, и картинка не отображалась бы.
+    /// </summary>
+    private string ImportInlineImages(string html,long documentId,string baseFolder)
+    {
+        return MarkdownService.RewriteImageSources(html,source=>
+        {
+            try
+            {
+                if(string.IsNullOrWhiteSpace(source)||MarkdownService.AssetName(source) is not null)return null;
+                byte[] bytes;var fileName=Path.GetFileName(source);var mime="";
+                if(source.StartsWith("data:",StringComparison.OrdinalIgnoreCase))
+                {
+                    var comma=source.IndexOf(',');if(comma<0)return null;
+                    mime=Regex.Match(source[..comma],@"data:(?<mime>[^;,]+)").Groups["mime"].Value;
+                    bytes=Convert.FromBase64String(source[(comma+1)..]);
+                    fileName="image"+(mime.Contains("png")?".png":mime.Contains("gif")?".gif":mime.Contains("webp")?".webp":".jpg");
+                }
+                else
+                {
+                    var path=Uri.TryCreate(source,UriKind.Absolute,out var uri)&&uri.IsFile?uri.LocalPath:Path.IsPathRooted(source)?source:Path.GetFullPath(Path.Combine(baseFolder,Uri.UnescapeDataString(source)));
+                    if(!File.Exists(path))return null;
+                    bytes=File.ReadAllBytes(path);fileName=Path.GetFileName(path);
+                }
+                if(mime.Length==0)mime=GuessMimeType(fileName);
+                var asset=StoreAssetBytes(bytes,fileName,mime);
+                if(!_vm.Database.GetAttachments(documentId).Any(x=>x.Sha256.Equals(asset.Hash,StringComparison.OrdinalIgnoreCase)))
+                    _vm.Database.RegisterAttachment(documentId,fileName,asset.StoredName,mime,asset.Size,asset.Hash);
+                return "https://assets.local/"+asset.StoredName;
+            }
+            catch(Exception ex){LogService.Error("Не удалось перенести изображение импортируемого документа",ex);return null;}
+        });
+    }
     private static string SanitizeImportedHtml(string html){html=Regex.Replace(html,@"<(script|iframe|object|embed)\b[^>]*>[\s\S]*?</\1>","",RegexOptions.IgnoreCase);html=Regex.Replace(html,@"\son\w+\s*=\s*(['""]).*?\1","",RegexOptions.IgnoreCase);return html;}
     private static string HtmlToPlainText(string html)=>System.Net.WebUtility.HtmlDecode(Regex.Replace(Regex.Replace(html,@"<(br|/p|/div|/h[1-6]|/li)>","\n",RegexOptions.IgnoreCase),"<[^>]+>"," ")).Trim();
     private void Rename_Click(object sender, RoutedEventArgs e)
@@ -490,9 +539,9 @@ public partial class MainWindow : Window
         if(_vm.SelectedTab is null){MessageBox.Show(this,"Сначала откройте документ.","Вложения");return;}var dialog=new OpenFileDialog{Title="Добавить вложение",Filter="Все файлы|*.*",Multiselect=true};if(dialog.ShowDialog(this)!=true)return;
         try{foreach(var path in dialog.FileNames){var asset=StoreAsset(path);if(_vm.Database.GetAttachments(_vm.SelectedTab.DocumentId).Any(x=>x.Sha256.Equals(asset.Hash,StringComparison.OrdinalIgnoreCase)))continue;_vm.Database.RegisterAttachment(_vm.SelectedTab.DocumentId,Path.GetFileName(path),asset.StoredName,GuessMimeType(path),asset.Size,asset.Hash);}LoadDocumentProperties();}catch(Exception ex){LogService.Error("Не удалось добавить вложение",ex);MessageBox.Show(this,"Не удалось добавить вложение: "+ex.Message,"Вложения",MessageBoxButton.OK,MessageBoxImage.Error);}
     }
-    private void OpenAttachment_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;var path=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(path)){MessageBox.Show(this,"Файл вложения не найден в локальном хранилище.","Вложения",MessageBoxButton.OK,MessageBoxImage.Warning);return;}Process.Start(new ProcessStartInfo(path){UseShellExecute=true});}
-    private void ShowAttachmentInFolder_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;var path=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(path)){MessageBox.Show(this,"Файл вложения не найден. Проверьте целостность хранилища или восстановите резервную копию.","Вложения",MessageBoxButton.OK,MessageBoxImage.Warning);return;}Process.Start(new ProcessStartInfo("explorer.exe",$"/select,\"{path}\""){UseShellExecute=true});}
-    private void SaveAttachment_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;var source=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(source)){MessageBox.Show(this,"Файл вложения не найден.","Вложения");return;}var dialog=new SaveFileDialog{Title="Сохранить вложение",FileName=item.FileName,Filter="Все файлы|*.*"};if(dialog.ShowDialog(this)==true)File.Copy(source,dialog.FileName,true);}
+    private void OpenAttachment_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;_vm.Database.MaterializeAsset(item.StoredName);var path=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(path)){MessageBox.Show(this,"Файл вложения не найден в локальном хранилище.","Вложения",MessageBoxButton.OK,MessageBoxImage.Warning);return;}Process.Start(new ProcessStartInfo(path){UseShellExecute=true});}
+    private void ShowAttachmentInFolder_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;_vm.Database.MaterializeAsset(item.StoredName);var path=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(path)){MessageBox.Show(this,"Файл вложения не найден. Проверьте целостность хранилища или восстановите резервную копию.","Вложения",MessageBoxButton.OK,MessageBoxImage.Warning);return;}Process.Start(new ProcessStartInfo("explorer.exe",$"/select,\"{path}\""){UseShellExecute=true});}
+    private void SaveAttachment_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;_vm.Database.MaterializeAsset(item.StoredName);var source=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(source)){MessageBox.Show(this,"Файл вложения не найден.","Вложения");return;}var dialog=new SaveFileDialog{Title="Сохранить вложение",FileName=item.FileName,Filter="Все файлы|*.*"};if(dialog.ShowDialog(this)==true)File.Copy(source,dialog.FileName,true);}
     private void RemoveAttachment_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;if(MessageBox.Show(this,$"Удалить связь с файлом «{item.FileName}»?\nСам файл будет удалён только если больше нигде не используется.","Удаление вложения",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes)return;try{var removed=_vm.Database.RemoveAttachment(item.Id);if(removed.IsUnused){var path=Path.Combine(AppPaths.Assets,removed.StoredName);if(File.Exists(path))File.Delete(path);}LoadDocumentProperties();}catch(Exception ex){MessageBox.Show(this,"Не удалось удалить вложение: "+ex.Message,"Вложения",MessageBoxButton.OK,MessageBoxImage.Error);}}
     private static string GuessMimeType(string path)=>Path.GetExtension(path).ToLowerInvariant() switch{".png"=>"image/png",".jpg" or ".jpeg"=>"image/jpeg",".gif"=>"image/gif",".svg"=>"image/svg+xml",".pdf"=>"application/pdf",".docx"=>"application/vnd.openxmlformats-officedocument.wordprocessingml.document",".xlsx"=>"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",".zip"=>"application/zip",".json"=>"application/json",".html" or ".htm"=>"text/html",".md"=>"text/markdown",".txt"=>"text/plain",_=>"application/octet-stream"};
     private void Status_Changed(object sender,SelectionChangedEventArgs e){if(_loading||_vm?.SelectedTab is null||StatusBox.SelectedItem is null)return;var value=StatusBox.SelectedItem is ComboBoxItem item?item.Content?.ToString():StatusBox.SelectedItem.ToString();if(!string.IsNullOrWhiteSpace(value)){_vm.Database.SetStatus(_vm.SelectedTab.DocumentId,value);UpdateStatusIndicator(value);}}
@@ -670,8 +719,11 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) { LogService.Error("Ошибка вставки изображения", ex); MessageBox.Show("Не удалось вставить изображение: " + ex.Message); }
     }
-    private (string StoredName,string Hash,long Size) StoreAsset(string source){using var input=File.OpenRead(source);var hash=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(input));var existing=_vm.Database.FindStoredAttachmentByHash(hash);if(existing is not null&&File.Exists(Path.Combine(AppPaths.Assets,existing)))return(existing,hash,new FileInfo(Path.Combine(AppPaths.Assets,existing)).Length);var extension=Path.GetExtension(source).ToLowerInvariant();var name=hash.ToLowerInvariant()+extension;var target=Path.Combine(AppPaths.Assets,name);Directory.CreateDirectory(AppPaths.Assets);if(!File.Exists(target))File.Copy(source,target);return(name,hash,new FileInfo(target).Length);}
-    private (string StoredName,string Hash,long Size) StoreAssetBytes(byte[] bytes,string fileName,string mime){var hash=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));var existing=_vm.Database.FindStoredAttachmentByHash(hash);if(existing is not null&&File.Exists(Path.Combine(AppPaths.Assets,existing)))return(existing,hash,bytes.LongLength);var extension=Path.GetExtension(fileName).ToLowerInvariant();if(!Regex.IsMatch(extension,@"^\.[a-z0-9]{1,10}$"))extension=mime.ToLowerInvariant() switch{"image/png"=>".png","image/jpeg"=>".jpg","image/gif"=>".gif","image/webp"=>".webp","application/pdf"=>".pdf",_=>".bin"};var name=hash.ToLowerInvariant()+extension;var target=Path.Combine(AppPaths.Assets,name);Directory.CreateDirectory(AppPaths.Assets);if(!File.Exists(target)){var temporary=target+".tmp";File.WriteAllBytes(temporary,bytes);File.Move(temporary,target,true);}return(name,hash,bytes.LongLength);}
+    // Файл вложения хранится под именем «<sha256>.<расширение>»: одинаковые файлы не дублируются,
+    // а содержимое кладётся и в локальную папку Assets, и в базу данных — тогда изображение
+    // отображается у всех, кто подключён к этой базе, а не только на компьютере автора.
+    private (string StoredName,string Hash,long Size) StoreAsset(string source)=>StoreAssetBytes(File.ReadAllBytes(source),Path.GetFileName(source),GuessMimeType(source));
+    private (string StoredName,string Hash,long Size) StoreAssetBytes(byte[] bytes,string fileName,string mime){var hash=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));var existing=_vm.Database.FindStoredAttachmentByHash(hash);if(existing is not null&&_vm.Database.MaterializeAsset(existing))return(existing,hash,bytes.LongLength);var extension=Path.GetExtension(fileName).ToLowerInvariant();if(!Regex.IsMatch(extension,@"^\.[a-z0-9]{1,10}$"))extension=mime.ToLowerInvariant() switch{"image/png"=>".png","image/jpeg"=>".jpg","image/gif"=>".gif","image/webp"=>".webp","application/pdf"=>".pdf",_=>".bin"};var name=hash.ToLowerInvariant()+extension;_vm.Database.StoreAssetContent(name,hash,mime,bytes);return(name,hash,bytes.LongLength);}
     private Image? SelectedImage() => Editor.CaretPosition.GetAdjacentElement(LogicalDirection.Forward) as Image ?? Editor.CaretPosition.GetAdjacentElement(LogicalDirection.Backward) as Image;
     private void ImageSmaller_Click(object sender, RoutedEventArgs e) {if(ModernEditor.Visibility==Visibility.Visible){_=ModernEditor.ExecuteAsync("imageScale",new{factor=.8});return;}var i=SelectedImage();if(i is not null)i.Width=Math.Max(40,(double.IsNaN(i.Width)?i.ActualWidth:i.Width)*.8);}
     private void ImageLarger_Click(object sender, RoutedEventArgs e) {if(ModernEditor.Visibility==Visibility.Visible){_=ModernEditor.ExecuteAsync("imageScale",new{factor=1.2});return;}var i=SelectedImage();if(i is not null)i.Width=Math.Min(1600,(double.IsNaN(i.Width)?i.ActualWidth:i.Width)*1.2);}
@@ -694,7 +746,7 @@ public partial class MainWindow : Window
         }
         catch(Exception ex){LogService.Error("Не удалось сжать изображение",ex);MessageBox.Show(this,"Не удалось сжать изображение: "+ex.Message,"Сжатие",MessageBoxButton.OK,MessageBoxImage.Error);}
     }
-    private static string? ResolveAssetPath(string source){if(!Uri.TryCreate(source,UriKind.Absolute,out var uri)||!uri.Host.Equals("assets.local",StringComparison.OrdinalIgnoreCase))return null;var file=Path.GetFileName(Uri.UnescapeDataString(uri.AbsolutePath));var root=Path.GetFullPath(AppPaths.Assets).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;var path=Path.GetFullPath(Path.Combine(AppPaths.Assets,file));return path.StartsWith(root,StringComparison.OrdinalIgnoreCase)&&File.Exists(path)?path:null;}
+    private string? ResolveAssetPath(string source){if(!Uri.TryCreate(source,UriKind.Absolute,out var uri)||!uri.Host.Equals("assets.local",StringComparison.OrdinalIgnoreCase))return null;var file=Path.GetFileName(Uri.UnescapeDataString(uri.AbsolutePath));_vm.Database.MaterializeAsset(file);var root=Path.GetFullPath(AppPaths.Assets).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;var path=Path.GetFullPath(Path.Combine(AppPaths.Assets,file));return path.StartsWith(root,StringComparison.OrdinalIgnoreCase)&&File.Exists(path)?path:null;}
     private async void ImageReplace_Click(object sender,RoutedEventArgs e)
     {
         if(!EnsureModernImage()||_vm.SelectedTab is null)return;var dialog=new OpenFileDialog{Title="Заменить изображение",Filter="Изображения|*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.tif;*.tiff;*.webp"};if(dialog.ShowDialog(this)!=true)return;
@@ -705,7 +757,7 @@ public partial class MainWindow : Window
     private bool EnsureModernImage(){if(ModernEditor.Visibility==Visibility.Visible&&_modernImageSelected)return true;MessageBox.Show(this,"Сначала щёлкните по изображению в документе.","Изображение",MessageBoxButton.OK,MessageBoxImage.Information);return false;}
     private void ModernEditor_AssetOpenRequested(object? sender,string source)
     {
-        if(!Uri.TryCreate(source,UriKind.Absolute,out var uri)||!uri.Host.Equals("assets.local",StringComparison.OrdinalIgnoreCase))return;var relative=Uri.UnescapeDataString(uri.AbsolutePath.TrimStart('/')).Replace('/',Path.DirectorySeparatorChar);var root=Path.GetFullPath(AppPaths.Assets).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;var path=Path.GetFullPath(Path.Combine(AppPaths.Assets,relative));if(!path.StartsWith(root,StringComparison.OrdinalIgnoreCase)||!File.Exists(path))return;Process.Start(new ProcessStartInfo(path){UseShellExecute=true});
+        if(!Uri.TryCreate(source,UriKind.Absolute,out var uri)||!uri.Host.Equals("assets.local",StringComparison.OrdinalIgnoreCase))return;var relative=Uri.UnescapeDataString(uri.AbsolutePath.TrimStart('/')).Replace('/',Path.DirectorySeparatorChar);_vm.Database.MaterializeAsset(relative);var root=Path.GetFullPath(AppPaths.Assets).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;var path=Path.GetFullPath(Path.Combine(AppPaths.Assets,relative));if(!path.StartsWith(root,StringComparison.OrdinalIgnoreCase)||!File.Exists(path))return;Process.Start(new ProcessStartInfo(path){UseShellExecute=true});
     }
     private async void ModernEditor_LinkOpenRequested(object? sender,string value)
     {
@@ -838,9 +890,9 @@ public partial class MainWindow : Window
         try
         {
             if(!string.IsNullOrWhiteSpace(html))
-                await Task.Run(()=>new DocumentExportService().Export(html,plainText,title,path));
+                await Task.Run(()=>new DocumentExportService(AppPaths.Assets).Export(html,plainText,title,path));
             else
-                new DocumentExportService().Export(Editor.Document,title,path);
+                new DocumentExportService(AppPaths.Assets).Export(Editor.Document,title,path);
             InteractionState.SetStatus(actionButton,InteractionStatus.Success);
             ToastService.Show(
                 "Документ экспортирован",

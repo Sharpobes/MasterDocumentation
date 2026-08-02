@@ -38,7 +38,7 @@ public partial class SettingsView : UserControl
     {
         SelectCombo(LanguageBox,_settings.Language);SelectCombo(StartupBox,_settings.StartupBehavior);RecentCountText.Text=_settings.RecentFilesCount.ToString();CompactCheck.IsChecked=_settings.CompactMode;UpdatesCheck.IsChecked=_settings.CheckUpdates;TooltipsCheck.IsChecked=_settings.ShowTooltips;ConfirmDeleteCheck.IsChecked=_settings.ConfirmDelete;SelectCombo(LinkBox,_settings.LinkBehavior);SelectCombo(UnitsBox,_settings.MeasurementUnits);
         DefaultFontBox.SelectedItem=Fonts.SystemFontFamilies.FirstOrDefault(x=>x.Source==_settings.DefaultFont);DefaultFontSizeBox.Text=_settings.DefaultFontSize.ToString();SpellCheckBox.IsChecked=_settings.SpellCheck;AutoSaveDelayBox.Text=_settings.AutoSaveDelaySeconds.ToString();SelectCombo(ThemeBox,_settings.Theme);EncryptionCheck.IsChecked=_settings.EncryptManualBackups;
-        DataPathBox.Text=AppPaths.Data;AssetsPathText.Text=AppPaths.Assets;BackupsPathText.Text=AppPaths.Backups;ExportsPathText.Text=AppPaths.Exports;RuntimeText.Text=$"Версия .NET: {Environment.Version}";AppPathText.Text="Путь приложения: "+AppContext.BaseDirectory;LoadHotkeys();
+        DataPathBox.Text=AppPaths.Data;AssetsPathText.Text=AppPaths.Assets;BackupsPathText.Text=AppPaths.Backups;ExportsPathText.Text=AppPaths.Exports;DocumentsPathText.Text=AppPaths.Documents;StorageUserBox.Text=UserIdentity.Current;RuntimeText.Text=$"Версия .NET: {Environment.Version}";AppPathText.Text="Путь приложения: "+AppContext.BaseDirectory;LoadHotkeys();
         StorageProviderPostgresRadio.IsChecked=_storageConfig.Provider==StorageProviderKind.Postgres;StorageProviderSqliteRadio.IsChecked=_storageConfig.Provider!=StorageProviderKind.Postgres;PostgresConnectionStringBox.Text=_storageConfig.PostgresConnectionString;PostgresConfigPanel.Visibility=_storageConfig.Provider==StorageProviderKind.Postgres?Visibility.Visible:Visibility.Collapsed;StorageProviderStatusText.Text="";
         _dirty=false;SaveButton.IsEnabled=false;
     }
@@ -120,6 +120,7 @@ public partial class SettingsView : UserControl
         _settings.Language=Selected(LanguageBox);_settings.StartupBehavior=Selected(StartupBox);_settings.RecentFilesCount=int.Parse(RecentCountText.Text);_settings.CompactMode=CompactCheck.IsChecked==true;_settings.CheckUpdates=UpdatesCheck.IsChecked==true;_settings.ShowTooltips=TooltipsCheck.IsChecked==true;_settings.ConfirmDelete=ConfirmDeleteCheck.IsChecked==true;_settings.LinkBehavior=Selected(LinkBox);_settings.MeasurementUnits=Selected(UnitsBox);_settings.DefaultFont=(DefaultFontBox.SelectedItem as FontFamily)?.Source??DefaultFontBox.Text;_settings.DefaultFontSize=fontSize;_settings.SpellCheck=SpellCheckBox.IsChecked==true;_settings.AutoSaveDelaySeconds=delay;_settings.Theme=Selected(ThemeBox);_settings.EncryptManualBackups=EncryptionCheck.IsChecked==true;_settings.Hotkeys=_hotkeys.ToDictionary(x=>x.Id,x=>x.Gesture);
         _settingsService.Save(_settings);
         _storageConfig=new StorageProviderConfig{Provider=newProvider,PostgresConnectionString=PostgresConnectionStringBox.Text.Trim()};StorageConfigService.Save(_storageConfig);
+        if(StorageUserBox.Text.Trim().Length>0&&StorageUserBox.Text.Trim()!=UserIdentity.Current)UserIdentity.Set(StorageUserBox.Text.Trim());
         _dirty=false;SaveButton.IsEnabled=false;SettingsSaved?.Invoke(_settings);
         if(providerChanged)MessageBox.Show(Window.GetWindow(this),"Провайдер хранения изменён. Перезапустите приложение, чтобы изменения вступили в силу.","Хранилище",MessageBoxButton.OK,MessageBoxImage.Information);
         return true;
@@ -196,6 +197,13 @@ public partial class SettingsView : UserControl
         finally{Mouse.OverrideCursor=null;}
     }
     private void OpenExports_Click(object sender,RoutedEventArgs e)=>OpenFolder(AppPaths.Exports);
+    private void OpenDocuments_Click(object sender,RoutedEventArgs e)=>OpenFolder(AppPaths.Documents);
+    private void DatabaseTransfer_Click(object sender,RoutedEventArgs e)
+    {
+        var dialog=new DatabaseTransferWindow(_database){Owner=Window.GetWindow(this)};
+        dialog.ShowDialog();
+        LoadStatistics();
+    }
     private void OpenLogs_Click(object sender,RoutedEventArgs e)=>OpenFolder(AppPaths.Logs);
     private void CheckDatabase_Click(object sender,RoutedEventArgs e){try{var result=_database.CheckIntegrity();MessageBox.Show(Window.GetWindow(this),result=="ok"?"Целостность базы подтверждена.":"SQLite: "+result,"Проверка базы");}catch(Exception ex){MessageBox.Show(Window.GetWindow(this),ex.Message,"Ошибка",MessageBoxButton.OK,MessageBoxImage.Error);}}
     private void RebuildIndex_Click(object sender,RoutedEventArgs e){try{_database.RebuildSearchIndex();MessageBox.Show(Window.GetWindow(this),"Поисковый индекс перестроен.","Хранилище");}catch(Exception ex){MessageBox.Show(Window.GetWindow(this),"Не удалось перестроить индекс: "+ex.Message,"Ошибка",MessageBoxButton.OK,MessageBoxImage.Error);}}

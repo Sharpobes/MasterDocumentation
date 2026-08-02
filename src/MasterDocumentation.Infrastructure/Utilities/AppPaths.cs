@@ -8,6 +8,8 @@ public static class AppPaths
     public static string Data => _data;
     public static string Database => Path.Combine(Data, "master-documentation.db");
     public static string Assets => Path.Combine(Data, "Assets");
+    /// <summary>Зеркало страниц документации в формате Markdown (.md).</summary>
+    public static string Documents => Path.Combine(Data, "Documents");
     public static string Logs => Path.Combine(Data, "Logs");
     public static string Backups => Path.Combine(Data, "Backups");
     public static string Exports => Path.Combine(Data, "Exports");
@@ -18,7 +20,7 @@ public static class AppPaths
 
     public static void Ensure()
     {
-        foreach (var path in new[] { Data, Assets, Logs, Backups, Exports, Temp, Editor }) Directory.CreateDirectory(path);
+        foreach (var path in new[] { Data, Assets, Documents, Logs, Backups, Exports, Temp, Editor }) Directory.CreateDirectory(path);
     }
 
     public static void SaveDataLocation(string path,bool activateForCurrentProcess=false)

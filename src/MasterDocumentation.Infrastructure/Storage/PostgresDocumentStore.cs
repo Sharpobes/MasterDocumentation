@@ -47,6 +47,13 @@ public sealed class PostgresDocumentStore : IDocumentStore
         return connection;
     }
 
+    // Приватные страницы видит только их владелец: условие подставляется во все выборки,
+    // возвращающие список или содержимое документов. Все остальные страницы доступны каждому,
+    // кто подключился к этой базе через приложение.
+    private const string AccessFilter = "(IsPrivate=FALSE OR Owner='' OR lower(Owner)=lower(@user))";
+    private const string AccessFilterAliased = "(n.IsPrivate=FALSE OR n.Owner='' OR lower(n.Owner)=lower(@user))";
+    private static void AddUser(NpgsqlCommand command) => command.Parameters.AddWithValue("user", UserIdentity.Current);
+
     private static void AddNullableLong(NpgsqlCommand command, string name, long? value)
     {
         var parameter = command.CreateParameter();
@@ -92,6 +99,8 @@ public sealed class PostgresDocumentStore : IDocumentStore
                 CREATE TABLE IF NOT EXISTS DocumentTags(DocumentId BIGINT NOT NULL REFERENCES Nodes(Id) ON DELETE CASCADE, TagId BIGINT NOT NULL REFERENCES Tags(Id) ON DELETE CASCADE, PRIMARY KEY(DocumentId,TagId));
                 CREATE TABLE IF NOT EXISTS CustomProperties(Id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY, DocumentId BIGINT NOT NULL REFERENCES Nodes(Id) ON DELETE CASCADE, Name TEXT NOT NULL, Value TEXT NOT NULL, UNIQUE(DocumentId,Name));
                 CREATE TABLE IF NOT EXISTS Statuses(Name CITEXT PRIMARY KEY, SortOrder INTEGER NOT NULL DEFAULT 0, IsBuiltIn BOOLEAN NOT NULL DEFAULT FALSE);
+                CREATE TABLE IF NOT EXISTS Assets(StoredName TEXT PRIMARY KEY, Sha256 TEXT NOT NULL, MimeType TEXT NOT NULL DEFAULT '', Size BIGINT NOT NULL, Data BYTEA NOT NULL, CreatedAt TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS IX_Assets_Hash ON Assets(Sha256);
                 INSERT INTO Statuses(Name,SortOrder,IsBuiltIn) VALUES('Черновик',0,TRUE),('В работе',1,TRUE),('На проверке',2,TRUE),('Завершён',3,TRUE),('Архив',4,TRUE) ON CONFLICT (Name) DO NOTHING;
                 INSERT INTO SchemaMigrations(Version,AppliedAt) VALUES(1,@now) ON CONFLICT (Version) DO NOTHING;
                 """;
@@ -109,6 +118,9 @@ public sealed class PostgresDocumentStore : IDocumentStore
         EnsureColumn(connection, "Nodes", "Guid", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(connection, "Nodes", "Author", "TEXT NOT NULL DEFAULT 'Локальный пользователь'");
         EnsureColumn(connection, "Nodes", "TemplateSourceId", "BIGINT NULL");
+        EnsureColumn(connection, "Nodes", "Markdown", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(connection, "Nodes", "IsPrivate", "BOOLEAN NOT NULL DEFAULT FALSE");
+        EnsureColumn(connection, "Nodes", "Owner", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(connection, "DocumentVersions", "EditorJson", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(connection, "DocumentVersions", "Html", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(connection, "DocumentVersions", "IsPinned", "BOOLEAN NOT NULL DEFAULT FALSE");
@@ -150,24 +162,25 @@ public sealed class PostgresDocumentStore : IDocumentStore
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
+        AddUser(command);
         if (string.IsNullOrWhiteSpace(query))
         {
-            command.CommandText = "SELECT Id,ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt FROM Nodes WHERE DeletedAt IS NULL ORDER BY SortOrder,Title";
+            command.CommandText = $"SELECT Id,ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt FROM Nodes WHERE DeletedAt IS NULL AND {AccessFilter} ORDER BY SortOrder,Title";
         }
         else
         {
             var term = query.Trim();
-            command.CommandText = """
+            command.CommandText = $"""
                 WITH RECURSIVE matched(Id) AS (
                   SELECT n.Id FROM Nodes n
-                  WHERE n.DeletedAt IS NULL AND (n.Title ILIKE @q OR (n.IsFolder=FALSE AND n.Id IN (SELECT NodeId FROM SearchIndex WHERE SearchVector @@ to_tsquery('russian', @fts))))
+                  WHERE n.DeletedAt IS NULL AND {AccessFilterAliased} AND (n.Title ILIKE @q OR (n.IsFolder=FALSE AND n.Id IN (SELECT NodeId FROM SearchIndex WHERE SearchVector @@ to_tsquery('russian', @fts))))
                 ), visible(Id) AS (
                   SELECT Id FROM matched
                   UNION
                   SELECT n.ParentId FROM Nodes n JOIN visible v ON n.Id=v.Id WHERE n.ParentId IS NOT NULL
                 )
                 SELECT DISTINCT n.Id,n.ParentId,n.IsFolder,n.Title,n.SortOrder,n.CreatedAt,n.ModifiedAt
-                FROM Nodes n JOIN visible v ON v.Id=n.Id WHERE n.DeletedAt IS NULL ORDER BY n.SortOrder,n.Title
+                FROM Nodes n JOIN visible v ON v.Id=n.Id WHERE n.DeletedAt IS NULL AND {AccessFilterAliased} ORDER BY n.SortOrder,n.Title
                 """;
             command.Parameters.AddWithValue("q", $"%{term}%");
             var fts = BuildTsQuery(term);
@@ -190,13 +203,16 @@ public sealed class PostgresDocumentStore : IDocumentStore
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id,ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt FROM Nodes WHERE Id=@id AND DeletedAt IS NULL";
+        command.CommandText = $"SELECT Id,ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt FROM Nodes WHERE Id=@id AND DeletedAt IS NULL AND {AccessFilter}";
         command.Parameters.AddWithValue("id", id);
+        AddUser(command);
         using var reader = command.ExecuteReader();
         return reader.Read() ? new NodeItem { Id = reader.GetInt64(0), ParentId = reader.IsDBNull(1) ? null : reader.GetInt64(1), IsFolder = reader.GetBoolean(2), Title = reader.GetString(3), SortOrder = reader.GetInt32(4), CreatedAt = DateTime.Parse(reader.GetString(5)), ModifiedAt = DateTime.Parse(reader.GetString(6)) } : null;
     }
 
-    public long Create(long? parentId, bool folder, string title)
+    public long Create(long? parentId, bool folder, string title) => Create(parentId, folder, title, false);
+
+    public long Create(long? parentId, bool folder, string title, bool isPrivate)
     {
         title = title.Trim();
         if (title.Length == 0) throw new ArgumentException("Название не может быть пустым.");
@@ -204,12 +220,14 @@ public sealed class PostgresDocumentStore : IDocumentStore
         var now = DateTime.UtcNow.ToString("O");
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "INSERT INTO Nodes(ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt,Guid) VALUES(@p,@f,@t,(SELECT COALESCE(MAX(SortOrder)+1,0) FROM Nodes WHERE ParentId IS NOT DISTINCT FROM @p),@c,@c,@g) RETURNING Id";
+        command.CommandText = "INSERT INTO Nodes(ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt,Guid,Author,IsPrivate,Owner) VALUES(@p,@f,@t,(SELECT COALESCE(MAX(SortOrder)+1,0) FROM Nodes WHERE ParentId IS NOT DISTINCT FROM @p),@c,@c,@g,@owner,@private,@owner) RETURNING Id";
         AddNullableLong(command, "p", parentId);
         command.Parameters.AddWithValue("f", folder);
         command.Parameters.AddWithValue("t", title);
         command.Parameters.AddWithValue("c", now);
         command.Parameters.AddWithValue("g", Guid.NewGuid().ToString("D"));
+        command.Parameters.AddWithValue("private", isPrivate);
+        command.Parameters.AddWithValue("owner", UserIdentity.Current);
         return (long)command.ExecuteScalar()!;
     }
 
@@ -259,8 +277,8 @@ public sealed class PostgresDocumentStore : IDocumentStore
         {
             command.Transaction = transaction;
             command.CommandText = """
-                INSERT INTO Nodes(ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt,Content,PlainText,Status,EditorJson,Html,TemplateSourceId,Guid)
-                SELECT @p,FALSE,@t,(SELECT COALESCE(MAX(SortOrder)+1,0) FROM Nodes WHERE ParentId IS NOT DISTINCT FROM @p),@d,@d,Content,PlainText,'Черновик',EditorJson,Html,Id,gen_random_uuid()::text
+                INSERT INTO Nodes(ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt,Content,PlainText,Status,EditorJson,Html,Markdown,TemplateSourceId,Guid,Author,Owner)
+                SELECT @p,FALSE,@t,(SELECT COALESCE(MAX(SortOrder)+1,0) FROM Nodes WHERE ParentId IS NOT DISTINCT FROM @p),@d,@d,Content,PlainText,'Черновик',EditorJson,Html,Markdown,Id,gen_random_uuid()::text,@owner,@owner
                 FROM Nodes WHERE Id=@id AND IsTemplate=TRUE
                 RETURNING Id
                 """;
@@ -268,6 +286,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
             command.Parameters.AddWithValue("t", title.Trim());
             command.Parameters.AddWithValue("d", DateTime.UtcNow.ToString("O"));
             command.Parameters.AddWithValue("id", templateId);
+            command.Parameters.AddWithValue("owner", UserIdentity.Current);
             var result = command.ExecuteScalar();
             if (result is null) throw new InvalidOperationException("Шаблон не найден.");
             created = (long)result;
@@ -349,8 +368,9 @@ public sealed class PostgresDocumentStore : IDocumentStore
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id,ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt FROM Nodes WHERE Guid=@guid AND IsFolder=FALSE AND DeletedAt IS NULL";
+        command.CommandText = $"SELECT Id,ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt FROM Nodes WHERE Guid=@guid AND IsFolder=FALSE AND DeletedAt IS NULL AND {AccessFilter}";
         command.Parameters.AddWithValue("guid", guid);
+        AddUser(command);
         using var reader = command.ExecuteReader();
         return reader.Read() ? new NodeItem { Id = reader.GetInt64(0), ParentId = reader.IsDBNull(1) ? null : reader.GetInt64(1), IsFolder = false, Title = reader.GetString(3), SortOrder = reader.GetInt32(4), CreatedAt = DateTime.Parse(reader.GetString(5)), ModifiedAt = DateTime.Parse(reader.GetString(6)) } : null;
     }
@@ -460,8 +480,8 @@ public sealed class PostgresDocumentStore : IDocumentStore
         {
             command.Transaction = transaction;
             command.CommandText = """
-                INSERT INTO Nodes(ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt,Content,PlainText,Status,EditorJson,Html,Zoom,Guid,Author)
-                SELECT ParentId,IsFolder,@t,(SELECT COALESCE(MAX(SortOrder)+1,0) FROM Nodes x WHERE x.ParentId IS NOT DISTINCT FROM Nodes.ParentId),@d,@d,Content,PlainText,Status,EditorJson,Html,Zoom,gen_random_uuid()::text,Author
+                INSERT INTO Nodes(ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt,Content,PlainText,Status,EditorJson,Html,Markdown,Zoom,Guid,Author,IsPrivate,Owner)
+                SELECT ParentId,IsFolder,@t,(SELECT COALESCE(MAX(SortOrder)+1,0) FROM Nodes x WHERE x.ParentId IS NOT DISTINCT FROM Nodes.ParentId),@d,@d,Content,PlainText,Status,EditorJson,Html,Markdown,Zoom,gen_random_uuid()::text,Author,IsPrivate,Owner
                 FROM Nodes WHERE Id=@id
                 RETURNING Id
                 """;
@@ -505,8 +525,9 @@ public sealed class PostgresDocumentStore : IDocumentStore
         byte[]? content; string createdText, modifiedText;
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT Content,CreatedAt,ModifiedAt FROM Nodes WHERE Id=@id";
+            command.CommandText = $"SELECT Content,CreatedAt,ModifiedAt FROM Nodes WHERE Id=@id AND {AccessFilter}";
             command.Parameters.AddWithValue("id", id);
+            AddUser(command);
             using var reader = command.ExecuteReader();
             if (!reader.Read()) throw new InvalidOperationException("Документ не найден.");
             content = reader.IsDBNull(0) ? null : (byte[])reader[0];
@@ -574,8 +595,9 @@ public sealed class PostgresDocumentStore : IDocumentStore
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EditorJson,Html,PlainText FROM Nodes WHERE Id=@id";
+        command.CommandText = $"SELECT EditorJson,Html,PlainText FROM Nodes WHERE Id=@id AND {AccessFilter}";
         command.Parameters.AddWithValue("id", id);
+        AddUser(command);
         using var reader = command.ExecuteReader();
         if (!reader.Read()) throw new InvalidOperationException("Документ не найден.");
         return (reader.GetString(0), reader.GetString(1), reader.GetString(2));
@@ -583,6 +605,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
 
     public void SaveStructuredContent(long id, string json, string html, string plainText)
     {
+        var markdown = MarkdownService.FromHtml(html, GetTitle(id));
         using var connection = Open();
         using var transaction = connection.BeginTransaction();
         using (var version = connection.CreateCommand())
@@ -597,11 +620,12 @@ public sealed class PostgresDocumentStore : IDocumentStore
         using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "UPDATE Nodes SET EditorJson=@j, Html=@h, PlainText=@p, ModifiedAt=@d WHERE Id=@id";
+            command.CommandText = "UPDATE Nodes SET EditorJson=@j, Html=@h, PlainText=@p, Markdown=@md, ModifiedAt=@d WHERE Id=@id";
             command.Parameters.AddWithValue("id", id);
             command.Parameters.AddWithValue("j", json);
             command.Parameters.AddWithValue("h", html);
             command.Parameters.AddWithValue("p", plainText);
+            command.Parameters.AddWithValue("md", markdown);
             command.Parameters.AddWithValue("d", DateTime.UtcNow.ToString("O"));
             command.ExecuteNonQuery();
         }
@@ -614,6 +638,115 @@ public sealed class PostgresDocumentStore : IDocumentStore
         }
         transaction.Commit();
         RefreshSearchIndex(id);
+    }
+
+    private string GetTitle(long id)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Title FROM Nodes WHERE Id=@id";
+        command.Parameters.AddWithValue("id", id);
+        return command.ExecuteScalar() as string ?? "";
+    }
+
+    public string GetDocumentMarkdown(long documentId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT Markdown,Html,Title FROM Nodes WHERE Id=@id AND {AccessFilter}";
+        command.Parameters.AddWithValue("id", documentId);
+        AddUser(command);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) throw new InvalidOperationException("Документ не найден.");
+        var markdown = reader.GetString(0);
+        return markdown.Length > 0 ? markdown : MarkdownService.FromHtml(reader.GetString(1), reader.GetString(2));
+    }
+
+    public void SetDocumentMarkdown(long documentId, string markdown)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE Nodes SET Markdown=@md, ModifiedAt=@d WHERE Id=@id";
+        command.Parameters.AddWithValue("id", documentId);
+        command.Parameters.AddWithValue("md", markdown ?? "");
+        command.Parameters.AddWithValue("d", DateTime.UtcNow.ToString("O"));
+        command.ExecuteNonQuery();
+    }
+
+    public DocumentAccess GetDocumentAccess(long documentId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT IsPrivate,Owner FROM Nodes WHERE Id=@id";
+        command.Parameters.AddWithValue("id", documentId);
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? new DocumentAccess(documentId, reader.GetBoolean(0), reader.GetString(1)) : new DocumentAccess(documentId, false, "");
+    }
+
+    public void SetDocumentAccess(long documentId, bool isPrivate)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE Nodes SET IsPrivate=@private, Owner=CASE WHEN Owner='' THEN @owner ELSE Owner END, ModifiedAt=@d WHERE Id=@id";
+        command.Parameters.AddWithValue("id", documentId);
+        command.Parameters.AddWithValue("private", isPrivate);
+        command.Parameters.AddWithValue("owner", UserIdentity.Current);
+        command.Parameters.AddWithValue("d", DateTime.UtcNow.ToString("O"));
+        command.ExecuteNonQuery();
+    }
+
+    public void SaveAssetContent(string storedName, string sha256, string mimeType, byte[] data)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO Assets(StoredName,Sha256,MimeType,Size,Data,CreatedAt) VALUES(@n,@h,@m,@s,@d,@c) ON CONFLICT (StoredName) DO UPDATE SET Sha256=EXCLUDED.Sha256, MimeType=EXCLUDED.MimeType, Size=EXCLUDED.Size, Data=EXCLUDED.Data";
+        command.Parameters.AddWithValue("n", storedName);
+        command.Parameters.AddWithValue("h", sha256);
+        command.Parameters.AddWithValue("m", mimeType ?? "");
+        command.Parameters.AddWithValue("s", data.LongLength);
+        command.Parameters.AddWithValue("d", data);
+        command.Parameters.AddWithValue("c", DateTime.UtcNow.ToString("O"));
+        command.ExecuteNonQuery();
+    }
+
+    public bool AssetExists(string storedName)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM Assets WHERE StoredName=@n)";
+        command.Parameters.AddWithValue("n", storedName);
+        return (bool)command.ExecuteScalar()!;
+    }
+
+    public (byte[] Data, string MimeType)? LoadAssetContent(string storedName)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Data,MimeType FROM Assets WHERE StoredName=@n";
+        command.Parameters.AddWithValue("n", storedName);
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ((byte[])reader[0], reader.GetString(1)) : null;
+    }
+
+    public IReadOnlyList<string> GetReferencedAssetNames(long documentId)
+    {
+        using var connection = Open();
+        var names = new List<string>();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT EditorJson,Html,Markdown FROM Nodes WHERE Id=@id";
+            command.Parameters.AddWithValue("id", documentId);
+            using var reader = command.ExecuteReader();
+            if (reader.Read()) names.AddRange(AssetReferences.Extract(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+        }
+        using (var attachments = connection.CreateCommand())
+        {
+            attachments.CommandText = "SELECT StoredName FROM Attachments WHERE DocumentId=@id";
+            attachments.Parameters.AddWithValue("id", documentId);
+            using var reader = attachments.ExecuteReader();
+            while (reader.Read()) names.Add(reader.GetString(0));
+        }
+        return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     public string? GetSetting(string key)
@@ -1005,7 +1138,8 @@ public sealed class PostgresDocumentStore : IDocumentStore
         using var command = connection.CreateCommand();
         var tsQuery = BuildTsQuery(query ?? "");
         var hasQuery = tsQuery.Length > 0;
-        var where = new List<string> { "n.IsFolder=FALSE", includeTrash ? "1=1" : "n.DeletedAt IS NULL" };
+        var where = new List<string> { "n.IsFolder=FALSE", includeTrash ? "1=1" : "n.DeletedAt IS NULL", AccessFilterAliased };
+        AddUser(command);
         if (!string.IsNullOrWhiteSpace(status) && status != "Все статусы") { where.Add("n.Status=@status"); command.Parameters.AddWithValue("status", status); }
         if (!string.IsNullOrWhiteSpace(tag)) { where.Add("EXISTS(SELECT 1 FROM DocumentTags dt JOIN Tags t ON t.Id=dt.TagId WHERE dt.DocumentId=n.Id AND t.Name=@tag)"); command.Parameters.AddWithValue("tag", tag.Trim()); }
         if (favoritesOnly) where.Add("n.IsFavorite=TRUE");
@@ -1072,6 +1206,17 @@ public sealed class PostgresDocumentStore : IDocumentStore
 
     public void CleanupUnusedAssets()
     {
+        using (var purge = Open())
+        {
+            using var command = purge.CreateCommand();
+            command.CommandText = """
+                DELETE FROM Assets a
+                WHERE NOT EXISTS(SELECT 1 FROM Attachments t WHERE t.StoredName=a.StoredName)
+                  AND NOT EXISTS(SELECT 1 FROM Nodes n WHERE n.EditorJson LIKE '%'||a.StoredName||'%' OR n.Html LIKE '%'||a.StoredName||'%' OR n.Markdown LIKE '%'||a.StoredName||'%')
+                  AND NOT EXISTS(SELECT 1 FROM DocumentVersions v WHERE v.EditorJson LIKE '%'||a.StoredName||'%' OR v.Html LIKE '%'||a.StoredName||'%')
+                """;
+            command.ExecuteNonQuery();
+        }
         if (!Directory.Exists(AppPaths.Assets)) return;
         foreach (var file in Directory.EnumerateFiles(AppPaths.Assets))
         {
@@ -1090,7 +1235,8 @@ public sealed class PostgresDocumentStore : IDocumentStore
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM Nodes WHERE " + where;
+        command.CommandText = $"SELECT COUNT(*) FROM Nodes WHERE {where} AND {AccessFilter}";
+        AddUser(command);
         return (long)command.ExecuteScalar()!;
     }
 
@@ -1098,7 +1244,8 @@ public sealed class PostgresDocumentStore : IDocumentStore
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT Id,ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt FROM Nodes WHERE {where} ORDER BY {order}";
+        command.CommandText = $"SELECT Id,ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt FROM Nodes WHERE {where} AND {AccessFilter} ORDER BY {order}";
+        AddUser(command);
         var result = new List<NodeItem>();
         using var reader = command.ExecuteReader();
         while (reader.Read()) result.Add(new NodeItem { Id = reader.GetInt64(0), ParentId = reader.IsDBNull(1) ? null : reader.GetInt64(1), IsFolder = reader.GetBoolean(2), Title = reader.GetString(3), SortOrder = reader.GetInt32(4), CreatedAt = DateTime.Parse(reader.GetString(5)), ModifiedAt = DateTime.Parse(reader.GetString(6)) });

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Создание"
         Width="500"
-        Height="390"
+        Height="470"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         Style="{DynamicResource DialogWindowStyle}"
@@ -54,6 +54,12 @@
                        Foreground="{DynamicResource Text/Muted}"
                        TextWrapping="Wrap"
                        Margin="0,8,0,0"/>
+            <CheckBox x:Name="PrivateCheck" Content="Приватный документ" Margin="0,14,0,0" AutomationProperties.Name="Приватный документ"/>
+            <TextBlock x:Name="PrivateHintText"
+                       Text="Приватную страницу видит только её создатель. Остальные страницы доступны всем, кто подключился к этой базе данных через приложение."
+                       Foreground="{DynamicResource Text/Muted}"
+                       TextWrapping="Wrap"
+                       Margin="0,6,0,0"/>
         </StackPanel>
 
         <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">

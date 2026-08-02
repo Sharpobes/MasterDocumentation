@@ -63,6 +63,7 @@
                 <MenuItem Header="Резервная копия" Click="Backup_Click" />
                 <MenuItem Header="Восстановить" Click="Restore_Click" />
                 <MenuItem Header="Экспорт" InputGestureText="Ctrl+Shift+S" Click="Export_Click" />
+                <MenuItem Header="База данных: импорт и выгрузка…" Click="DatabaseTransfer_Click" />
                 <Separator />
                 <MenuItem x:Name="LibraryPanelMenuItem" Header="Показывать библиотеку" IsCheckable="True" IsChecked="True" Click="ToggleLibraryPanel_Click" />
                 <MenuItem x:Name="StructurePanelMenuItem" Header="Показывать структуру" IsCheckable="True" IsChecked="True" Click="ToggleStructurePanel_Click" />
@@ -230,6 +231,7 @@
                   <Button Content="▰   Новый раздел" HorizontalContentAlignment="Left" Click="NewSection_Click" />
                   <Separator />
                   <Button Content="⇩   Импорт документа" HorizontalContentAlignment="Left" Click="ImportDocument_Click" ToolTip="Импортировать документ (Ctrl+O)" />
+                  <Button Content="⛁   Импорт из базы данных" HorizontalContentAlignment="Left" Click="DatabaseTransfer_Click" ToolTip="Выбрать документы в базе данных и импортировать их, либо выгрузить свои документы в базу" />
                   <Button Content="◇   Новый шаблон" HorizontalContentAlignment="Left" Click="NewTemplate_Click" />
                 </StackPanel>
               </Border>
@@ -623,6 +625,7 @@
                         <Button Content="▱  Открыть папку данных" HorizontalContentAlignment="Left" Click="OpenDataFolder_Click" />
                         <Button Content="↥  Создать резервную копию" HorizontalContentAlignment="Left" Click="Backup_Click" />
                         <Button Content="↧  Восстановить копию" HorizontalContentAlignment="Left" Click="Restore_Click" />
+                        <Button Content="⛁  База данных: импорт и выгрузка" HorizontalContentAlignment="Left" Click="DatabaseTransfer_Click" />
                         <Button Content="⚙  Настройки" HorizontalContentAlignment="Left" Click="Settings_Click" />
                       </StackPanel>
                     </Border>
