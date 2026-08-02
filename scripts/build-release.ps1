@@ -7,8 +7,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.IO.Compression
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+# В Windows PowerShell сборки со сжатием нужно загрузить явно, в PowerShell 7 они уже доступны
+# и Add-Type может завершиться ошибкой — поэтому загрузка не должна прерывать сборку.
+foreach ($assembly in 'System.IO.Compression', 'System.IO.Compression.FileSystem') {
+    try { Add-Type -AssemblyName $assembly -ErrorAction Stop } catch { }
+}
+if (-not ('System.IO.Compression.ZipFile' -as [type])) { throw 'System.IO.Compression.ZipFile is not available in this PowerShell host.' }
 
 $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root 'src\MasterDocumentation.App\MasterDocumentation.App.csproj'
