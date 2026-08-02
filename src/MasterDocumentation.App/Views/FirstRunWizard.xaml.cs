@@ -13,7 +13,7 @@ public partial class FirstRunWizard : Window
     public bool AutomaticBackups { get; private set; }=true;
     public string? FirstDocumentTitle { get; private set; }
 
-    public FirstRunWizard(){InitializeComponent();DataPathBox.Text=AppPaths.Data;}
+    public FirstRunWizard(){InitializeComponent();WindowPlacementService.PrepareOwnerlessWindow(this);DataPathBox.Text=AppPaths.Data;}
     private void Browse_Click(object sender,RoutedEventArgs e){var dialog=new OpenFolderDialog{Title="Выберите папку для хранилища MasterDocumentation"};if(dialog.ShowDialog(this)==true)DataPathBox.Text=Path.Combine(dialog.FolderName,"MasterDocumentationData");}
     private void CreateDocument_Changed(object sender,RoutedEventArgs e){if(FirstDocumentBox is not null)FirstDocumentBox.IsEnabled=CreateDocumentCheck.IsChecked==true;}
     private void Skip_Click(object sender,RoutedEventArgs e){SelectedLanguage="Русский";SelectedTheme="Тёмная";SelectedDataPath=AppPaths.Data;AutomaticBackups=true;FirstDocumentTitle=null;DialogResult=true;}

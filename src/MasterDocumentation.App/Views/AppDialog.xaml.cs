@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using MasterDocumentation.UI;
+using MasterDocumentation.Utilities;
 
 namespace MasterDocumentation.Views;
 
@@ -135,6 +136,10 @@ public static class MessageBox
         var dialog = new AppDialog(message, caption, buttons, image);
         if (owner is { IsLoaded: true } && !ReferenceEquals(owner, dialog))
             dialog.Owner = owner;
+        else
+            // Диалог до появления главного окна остаётся единственным окном приложения:
+            // без этого он не попадает на панель задач и может открыться на другом мониторе.
+            WindowPlacementService.PrepareOwnerlessWindow(dialog);
         dialog.ShowDialog();
         return dialog.Result;
     }
