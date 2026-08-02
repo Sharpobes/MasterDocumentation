@@ -35,10 +35,16 @@ public partial class ToastHost : UserControl
     private readonly ObservableCollection<ToastMessage> _items = [];
     private readonly Dictionary<Guid, DispatcherTimer> _timers = [];
 
+    /// <summary>Количество видимых уведомлений изменилось — окно уведомлений подстраивает размер и видимость.</summary>
+    public event EventHandler? ItemsChanged;
+
+    public int Count => _items.Count;
+
     public ToastHost()
     {
         InitializeComponent();
         ToastItems.ItemsSource = _items;
+        _items.CollectionChanged += (_, _) => ItemsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public void Show(
@@ -123,9 +129,16 @@ public partial class ToastHost : UserControl
 
 public static class ToastService
 {
-    private static WeakReference<ToastHost>? _host;
+    private static Window? _owner;
+    private static ToastWindow? _window;
 
-    public static void Initialize(ToastHost host) => _host = new WeakReference<ToastHost>(host);
+    /// <summary>Привязывает уведомления к главному окну приложения.</summary>
+    public static void Initialize(Window owner)
+    {
+        _owner = owner;
+        _window = null;
+        owner.Closed += (_, _) => { _window = null; _owner = null; };
+    }
 
     public static void Show(
         string title,
@@ -137,7 +150,14 @@ public static class ToastService
         string? secondaryActionText = null,
         Action? secondaryAction = null)
     {
-        if (_host?.TryGetTarget(out var host) == true)
-            host.Show(title, message, kind, duration, primaryActionText, primaryAction, secondaryActionText, secondaryAction);
+        var owner = _owner;
+        if (owner is null) return;
+        if (!owner.Dispatcher.CheckAccess())
+        {
+            owner.Dispatcher.Invoke(() => Show(title, message, kind, duration, primaryActionText, primaryAction, secondaryActionText, secondaryAction));
+            return;
+        }
+        _window ??= new ToastWindow(owner);
+        _window.Host.Show(title, message, kind, duration, primaryActionText, primaryAction, secondaryActionText, secondaryAction);
     }
 }

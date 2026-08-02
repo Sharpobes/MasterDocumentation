@@ -27,7 +27,6 @@
       <RowDefinition Height="*" />
       <RowDefinition Height="34" />
     </Grid.RowDefinitions>
-    <views:ToastHost x:Name="Notifications" Grid.RowSpan="3" Panel.ZIndex="100" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
     <Grid x:Name="OperationOverlay" Grid.RowSpan="3" Panel.ZIndex="90" Visibility="Collapsed" Background="{DynamicResource Background/Overlay}">
       <Border Width="430" Padding="24" HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Strong}" BorderThickness="1" CornerRadius="{StaticResource Radius.Large}">
         <StackPanel>

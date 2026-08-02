@@ -21,6 +21,7 @@ public partial class App : Application
             LogService.Error("Необработанная ошибка", args.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, args) => { LogService.Error("Необработанная ошибка фоновой задачи", args.Exception); args.SetObserved(); };
         base.OnStartup(e);
+        if(Uninstaller.IsRequested(e.Args)){Uninstaller.Run(e.Args);Shutdown();return;}
         if(!EnsureWritableStorage()){Shutdown();return;}
         string? firstDocumentTitle=null;
         var bootstrapSettingsService=new SettingsService();var bootstrapSettings=bootstrapSettingsService.Load();

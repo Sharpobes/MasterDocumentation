@@ -4,18 +4,60 @@
              xmlns:ui="clr-namespace:MasterDocumentation.UI"
              IsHitTestVisible="True"
              Focusable="False">
+    <UserControl.Resources>
+        <!-- Кнопка закрытия уведомления. Собственный шаблон с ContentPresenter обязателен:
+             стиль IconButton рисует значок через IconPresenter, который игнорирует вложенный
+             элемент и оставляет кнопку пустой. -->
+        <Style x:Key="ToastCloseButton" TargetType="Button">
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="MinWidth" Value="28"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="Background" Value="{DynamicResource Background/Pressed}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Border/Strong}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource State/ErrorSoft}"/>
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource State/Error}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.75"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
     <ItemsControl x:Name="ToastItems"
                   HorizontalAlignment="Right"
                   VerticalAlignment="Bottom"
-                  Margin="0,0,20,20">
+                  Focusable="False">
         <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate><StackPanel VerticalAlignment="Bottom"/></ItemsPanelTemplate>
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
             <DataTemplate>
                 <Border Width="390"
-                        MaxWidth="460"
-                        Margin="0,6,0,0"
+                        Margin="0,8,0,0"
                         Padding="14,12"
                         Background="{DynamicResource Background/SurfaceElevated}"
                         BorderBrush="{DynamicResource Border/Strong}"
@@ -24,7 +66,7 @@
                         Effect="{StaticResource Shadow.Popup}">
                     <Grid MouseEnter="Toast_MouseEnter" MouseLeave="Toast_MouseLeave">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="30"/>
+                            <ColumnDefinition Width="28"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="34"/>
                         </Grid.ColumnDefinitions>
@@ -32,13 +74,17 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
-                        <ui:AppIcon Kind="{Binding Icon}" Width="18" Height="18" Foreground="{Binding Accent}" VerticalAlignment="Top" Margin="0,2,0,0"/>
-                        <StackPanel Grid.Column="1">
+                        <ui:AppIcon Kind="{Binding Icon}" Width="18" Height="18" Foreground="{Binding Accent}" VerticalAlignment="Top" Margin="0,3,0,0"/>
+                        <StackPanel Grid.Column="1" Margin="0,0,8,0">
                             <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"/>
                             <TextBlock Text="{Binding Message}" Margin="0,4,0,0" Foreground="{DynamicResource Text/Secondary}" TextWrapping="Wrap" MaxHeight="84"/>
                         </StackPanel>
-                        <Button Grid.Column="2" Style="{StaticResource IconButton}" ToolTip="Закрыть уведомление" Click="Close_Click">
-                            <ui:AppIcon Kind="Close" Width="14" Height="14" Foreground="{DynamicResource Text/Secondary}"/>
+                        <Button Grid.Column="2"
+                                Style="{StaticResource ToastCloseButton}"
+                                ToolTip="Закрыть уведомление"
+                                AutomationProperties.Name="Закрыть уведомление"
+                                Click="Close_Click">
+                            <ui:AppIcon Kind="Close" Width="12" Height="12" Foreground="{DynamicResource Text/Primary}"/>
                         </Button>
                         <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,10,0,0">
                             <Button Content="{Binding PrimaryActionText}"
