@@ -74,6 +74,7 @@
                 <Separator />
                 <MenuItem Header="Тёмная тема" IsCheckable="True" IsChecked="{Binding DarkTheme}" />
                 <MenuItem Header="Проверить обновления" Click="CheckUpdates_Click" />
+                <MenuItem Header="Страница загрузок" Click="Downloads_Click" />
                 <MenuItem Header="О программе" Click="About_Click" />
                 <MenuItem Header="Выход" InputGestureText="Alt+F4" Click="Exit_Click" />
               </ContextMenu>
@@ -206,7 +207,8 @@
         <ColumnDefinition Width="6" />
         <ColumnDefinition x:Name="EditorColumn" Width="*" MinWidth="420" />
         <ColumnDefinition Width="6" />
-        <ColumnDefinition x:Name="PropertiesColumn" Width="265" MinWidth="210" />
+        <!-- Ниже 280 подписи и поле состояния начинают обрезаться, поэтому уже панель не сужается. -->
+        <ColumnDefinition x:Name="PropertiesColumn" Width="290" MinWidth="280" />
       </Grid.ColumnDefinitions>
       <!-- Левая навигация -->
       <Border Grid.Column="0" Style="{StaticResource PanelBorder}">
@@ -671,7 +673,8 @@
           </Grid>
           <Grid Grid.Row="1" Margin="14,15">
             <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="90" />
+              <!-- Ширина по самой длинной подписи: при фиксированных 90 «Тип документа» упирался в значение. -->
+              <ColumnDefinition Width="Auto" MinWidth="90" />
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
@@ -682,12 +685,13 @@
               <RowDefinition Height="38" />
               <RowDefinition Height="38" />
             </Grid.RowDefinitions>
-            <TextBlock Text="Тип документа" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" />
+            <TextBlock Text="Тип документа" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" Margin="0,0,12,0" />
             <TextBlock Grid.Column="1" Text="Документ" Foreground="{DynamicResource Text/Primary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-            <TextBlock Grid.Row="1" Text="Статус" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="1" Text="Статус" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" Margin="0,0,12,0" />
             <Grid Grid.Row="1" Grid.Column="1">
-              <Ellipse x:Name="StatusIndicator" Width="8" Height="8" Margin="11,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Center" Fill="{DynamicResource State/Info}" Panel.ZIndex="2" IsHitTestVisible="False" />
-              <ComboBox x:Name="StatusBox" Padding="28,6,34,6" SelectionChanged="Status_Changed">
+              <Ellipse x:Name="StatusIndicator" Width="8" Height="8" Margin="10,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Center" Fill="{DynamicResource State/Info}" Panel.ZIndex="2" IsHitTestVisible="False" />
+              <!-- Минимальная ширина под самое длинное состояние («На проверке»): при сужении панели слово обрезалось. -->
+              <ComboBox x:Name="StatusBox" MinWidth="142" Padding="24,6,34,6" SelectionChanged="Status_Changed">
                 <ComboBoxItem Content="Черновик" />
                 <ComboBoxItem Content="В работе" />
                 <ComboBoxItem Content="На проверке" />
@@ -695,7 +699,7 @@
                 <ComboBoxItem Content="Архив" />
               </ComboBox>
             </Grid>
-            <TextBlock Grid.Row="2" Text="Теги" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="2" Text="Теги" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" Margin="0,0,12,0" />
             <Button x:Name="TagsButton" Grid.Row="2" Grid.Column="1" Click="Tags_Click" HorizontalContentAlignment="Left" Padding="6,7" FontSize="12">
               <StackPanel Orientation="Horizontal">
                 <ItemsControl x:Name="TagChips">
@@ -704,7 +708,8 @@
                   </ItemsControl.ItemsPanel>
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <Border Background="{DynamicResource Accent/Soft}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Pill}" Padding="7,2" Margin="0,0,4,0">
+                      <!-- Скругление как у остальных элементов интерфейса: чип-«таблетка» выбивался из общего вида. -->
+                      <Border Background="{DynamicResource Accent/Soft}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Padding="7,2" Margin="0,0,5,0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding}" Foreground="{DynamicResource Text/Secondary}" MaxWidth="85" TextTrimming="CharacterEllipsis" ToolTip="{Binding}"/>
                       </Border>
                     </DataTemplate>
@@ -713,11 +718,11 @@
                 <TextBlock x:Name="TagsButtonText" Text="＋ Добавить" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
               </StackPanel>
             </Button>
-            <TextBlock Grid.Row="3" Text="Создан" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="3" Text="Создан" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" Margin="0,0,12,0" />
             <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedTab.CreatedAt,StringFormat={}{0:dd.MM.yyyy HH:mm}}" Foreground="{DynamicResource Text/Primary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-            <TextBlock Grid.Row="4" Text="Изменён" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="4" Text="Изменён" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" Margin="0,0,12,0" />
             <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding SelectedTab.ModifiedAt,StringFormat={}{0:dd.MM.yyyy HH:mm}}" Foreground="{DynamicResource Text/Primary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-            <TextBlock Grid.Row="5" Text="Автор" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="5" Text="Автор" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" Margin="0,0,12,0" />
             <TextBlock Grid.Row="5" Grid.Column="1" Text="Локальный пользователь" Foreground="{DynamicResource Text/Primary}" TextWrapping="Wrap" VerticalAlignment="Center" />
           </Grid>
           <Border Grid.Row="2" BorderBrush="{DynamicResource Border/Default}" BorderThickness="0,1">

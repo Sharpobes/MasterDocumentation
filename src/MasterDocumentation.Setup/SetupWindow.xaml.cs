@@ -10,6 +10,7 @@ public partial class SetupWindow : Window
     private readonly CancellationTokenSource _cancellation = new();
     private bool _running;
     private bool _finished;
+    private bool _launched;
     private string _installedDirectory = "";
 
     public SetupWindow() : this(null) { }
@@ -220,17 +221,31 @@ public partial class SetupWindow : Window
         StatusText.Text = "";
     }
 
-    private void LaunchApplication()
+    private void LaunchNow_Click(object sender, RoutedEventArgs e)
+    {
+        if (_launched || LaunchApplication()) Close();
+    }
+
+    /// <summary>
+    /// Запуск установленной копии. Кнопка на последнем шаге скрывается после успешного запуска:
+    /// второй экземпляр приложения работал бы с той же папкой данных.
+    /// </summary>
+    private bool LaunchApplication()
     {
         try
         {
             var executable = Path.Combine(_installedDirectory, InstallEngine.ExecutableName);
-            if (File.Exists(executable))
-                Process.Start(new ProcessStartInfo(executable) { UseShellExecute = true, WorkingDirectory = _installedDirectory });
+            if (!File.Exists(executable)) return false;
+            Process.Start(new ProcessStartInfo(executable) { UseShellExecute = true, WorkingDirectory = _installedDirectory });
+            _launched = true;
+            LaunchNowButton.Visibility = Visibility.Collapsed;
+            StatusText.Text = "Приложение запущено.";
+            return true;
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, "Не удалось запустить приложение: " + ex.Message, "Установка", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
         }
     }
 

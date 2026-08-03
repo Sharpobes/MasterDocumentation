@@ -53,6 +53,8 @@ public partial class MainWindow : Window
     private bool _structurePanelCollapsed;
     private bool _propertiesPanelCollapsed;
     private ObservableCollection<OutlineItem> _outlineRoots=[];
+    /// <summary>Минимальная ширина панели свойств: ниже неё подписи и поле состояния обрезаются.</summary>
+    private const double PropertiesMinWidth=280;
     private Point _tabDragStart;
     private DocumentTab? _draggedTab;
     public MainWindow(MainViewModel viewModel, SettingsService settingsService)
@@ -794,21 +796,25 @@ public partial class MainWindow : Window
     private async Task CheckForUpdatesAsync(bool silent)
     {
         if(_updateOffered)return;
-        var release=await UpdateService.CheckAsync();
+        // Бета-копия видит и предварительные выпуски, стабильная — только стабильные.
+        var release=await UpdateService.CheckAsync(AppVersion.IsPreRelease);
         if(release is null)
         {
-            if(!silent)ToastService.Show("Обновлений нет",$"Установлена последняя версия {UpdateService.CurrentVersion}.",ToastKind.Information);
+            if(!silent)ToastService.Show("Обновлений нет",$"Установлена последняя версия {AppVersion.Display}.",ToastKind.Information,null,"Страница загрузок",()=>OpenWebPage(UpdateService.ReleasesPageUrl));
             return;
         }
         _updateOffered=true;
         ToastService.Show(
-            $"Доступна версия {release.Version}",
-            $"Текущая версия {UpdateService.CurrentVersion}. Обновление скачается и установится само, документы останутся на месте.",
+            $"Доступна версия {release.Version}{(release.IsPreRelease?" (бета)":"")}",
+            $"Текущая версия {AppVersion.Display}. Обновление скачается и установится само, документы останутся на месте.",
             ToastKind.Information,
             TimeSpan.FromSeconds(12),
             "Обновить",
-            ()=>Dispatcher.BeginInvoke(new Action(async()=>await InstallUpdateAsync(release))));
+            ()=>Dispatcher.BeginInvoke(new Action(async()=>await InstallUpdateAsync(release))),
+            "Страница выпуска",
+            ()=>OpenWebPage(release.PageUrl));
     }
+    private void Downloads_Click(object sender,RoutedEventArgs e)=>OpenWebPage(UpdateService.ReleasesPageUrl);
     private async Task InstallUpdateAsync(UpdateRelease release)
     {
         if(OperationOverlay.Visibility==Visibility.Visible)return;
@@ -1013,6 +1019,12 @@ public partial class MainWindow : Window
         if(File.Exists(path))
             Process.Start(new ProcessStartInfo(path){UseShellExecute=true});
     }
+    /// <summary>Открывает страницу выпусков во внешнем браузере.</summary>
+    private static void OpenWebPage(string url)
+    {
+        try{if(Uri.TryCreate(url,UriKind.Absolute,out var uri)&&uri.Scheme is "http" or "https")Process.Start(new ProcessStartInfo(uri.AbsoluteUri){UseShellExecute=true});}
+        catch(Exception ex){LogService.Error("Не удалось открыть страницу выпусков",ex);}
+    }
     private static void ShowPathInFolder(string path)
     {
         if(File.Exists(path))
@@ -1054,7 +1066,7 @@ public partial class MainWindow : Window
     {
         if(double.TryParse(_vm.Database.GetSetting("LibraryWidth"),out var library))LibraryColumn.Width=new GridLength(Math.Clamp(library,190,360));
         if(double.TryParse(_vm.Database.GetSetting("StructureWidth"),out var structure))StructureColumn.Width=new GridLength(Math.Clamp(structure,168,330));
-        if(double.TryParse(_vm.Database.GetSetting("PropertiesWidth"),out var properties))PropertiesColumn.Width=new GridLength(Math.Clamp(properties,240,380));
+        if(double.TryParse(_vm.Database.GetSetting("PropertiesWidth"),out var properties))PropertiesColumn.Width=new GridLength(Math.Clamp(properties,PropertiesMinWidth,380));
         _wideStructureWidth=StructureColumn.Width;
         _widePropertiesWidth=PropertiesColumn.Width;
         _libraryPanelCollapsed=_vm.Database.GetSetting("LibraryPanelCollapsed")=="1";
@@ -1089,7 +1101,7 @@ public partial class MainWindow : Window
         StructureColumn.Width=hideStructure?new GridLength(0):_wideStructureWidth;
         WorkspaceGrid.ColumnDefinitions[3].Width=hideStructure?new GridLength(0):new GridLength(6);
         var hideProperties=_propertiesPanelCollapsed||nextMode>=1;
-        PropertiesColumn.MinWidth=hideProperties?0:240;
+        PropertiesColumn.MinWidth=hideProperties?0:PropertiesMinWidth;
         PropertiesColumn.Width=hideProperties?new GridLength(0):_widePropertiesWidth;
         WorkspaceGrid.ColumnDefinitions[5].Width=hideProperties?new GridLength(0):new GridLength(6);
         LibraryPanelMenuItem.IsChecked=!_libraryPanelCollapsed;
@@ -1097,8 +1109,10 @@ public partial class MainWindow : Window
         PropertiesPanelMenuItem.IsChecked=!_propertiesPanelCollapsed;
         _responsiveLayoutMode=nextMode;
 
-        if(width<1300){LibraryColumn.MaxWidth=205;StructureColumn.MaxWidth=185;PropertiesColumn.MaxWidth=240;}
-        else if(width<1450){LibraryColumn.MaxWidth=230;StructureColumn.MaxWidth=205;PropertiesColumn.MaxWidth=260;}
+        // Панель свойств не сужается ниже PropertiesMinWidth ни при каком размере окна:
+        // при меньшей ширине подписи и поле состояния обрезаются.
+        if(width<1300){LibraryColumn.MaxWidth=205;StructureColumn.MaxWidth=185;PropertiesColumn.MaxWidth=PropertiesMinWidth;}
+        else if(width<1450){LibraryColumn.MaxWidth=230;StructureColumn.MaxWidth=205;PropertiesColumn.MaxWidth=285;}
         else{LibraryColumn.MaxWidth=double.PositiveInfinity;StructureColumn.MaxWidth=double.PositiveInfinity;PropertiesColumn.MaxWidth=double.PositiveInfinity;}
     }
     private void EditorPanel_SizeChanged(object sender,SizeChangedEventArgs e)=>UpdateStartPageLayout(e.NewSize.Width);

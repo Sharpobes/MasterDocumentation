@@ -25,7 +25,9 @@ public sealed record UpdateRelease(
     string InstallerUrl,
     long InstallerSize,
     string? ChecksumUrl,
-    string Notes);
+    string Notes,
+    bool IsPreRelease,
+    string PageUrl);
 
 /// <summary>
 /// Обновление через тот же установщик, которым приложение и ставится: приложение скачивает
@@ -68,14 +70,21 @@ public static class UpdateService
         }
     }
 
-    /// <summary>Возвращает более новый релиз или null, если обновление не нужно или недоступно.</summary>
-    public static async Task<UpdateRelease?> CheckAsync(CancellationToken cancellationToken = default)
+    /// <summary>Страница выпусков: оттуда любую версию можно скачать вручную.</summary>
+    public static string ReleasesPageUrl => $"https://github.com/{Repository}/releases";
+
+    /// <summary>
+    /// Возвращает более новый выпуск или null, если обновление не нужно или недоступно.
+    /// Предварительные выпуски предлагаются только тем, кто уже работает на бете: иначе
+    /// стабильная копия сама перешла бы на бету.
+    /// </summary>
+    public static async Task<UpdateRelease?> CheckAsync(bool includePreRelease = false, CancellationToken cancellationToken = default)
     {
         try
         {
             using var client = CreateClient();
-            var json = await client.GetStringAsync($"https://api.github.com/repos/{Repository}/releases/latest", cancellationToken).ConfigureAwait(false);
-            var release = ParseRelease(json);
+            var json = await client.GetStringAsync($"https://api.github.com/repos/{Repository}/releases?per_page=20", cancellationToken).ConfigureAwait(false);
+            var release = SelectRelease(json, includePreRelease);
             return release is not null && release.Version > CurrentVersion ? release : null;
         }
         catch (Exception ex)
@@ -85,11 +94,30 @@ public static class UpdateService
         }
     }
 
+    /// <summary>Самый свежий пригодный выпуск из списка GitHub.</summary>
+    public static UpdateRelease? SelectRelease(string json, bool includePreRelease)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Array) return ParseRelease(json) is { } single && (includePreRelease || !single.IsPreRelease) ? single : null;
+        UpdateRelease? best = null;
+        foreach (var element in document.RootElement.EnumerateArray())
+        {
+            var release = ParseRelease(element);
+            if (release is null || (release.IsPreRelease && !includePreRelease)) continue;
+            if (best is null || release.Version > best.Version) best = release;
+        }
+        return best;
+    }
+
     /// <summary>Разбор ответа GitHub. Релиз без установщика в файлах обновлением не считается.</summary>
     public static UpdateRelease? ParseRelease(string json)
     {
         using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
+        return ParseRelease(document.RootElement);
+    }
+
+    private static UpdateRelease? ParseRelease(JsonElement root)
+    {
         if (root.ValueKind != JsonValueKind.Object) return null;
         if (root.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True) return null;
         var tag = root.TryGetProperty("tag_name", out var tagValue) ? tagValue.GetString() ?? "" : "";
@@ -117,7 +145,9 @@ public static class UpdateService
         }
         if (installerName is null || installerUrl is null) return null;
         var notes = root.TryGetProperty("body", out var body) ? body.GetString() ?? "" : "";
-        return new(version, tag, installerName, installerUrl, size, checksumUrl, notes);
+        var preRelease = root.TryGetProperty("prerelease", out var flag) && flag.ValueKind == JsonValueKind.True;
+        var page = root.TryGetProperty("html_url", out var pageValue) ? pageValue.GetString() ?? ReleasesPageUrl : ReleasesPageUrl;
+        return new(version, tag, installerName, installerUrl, size, checksumUrl, notes, preRelease, page);
     }
 
     /// <summary>Версия из тега вида v1.2.0 или 1.2.0-beta; суффикс предрелиза отбрасывается.</summary>

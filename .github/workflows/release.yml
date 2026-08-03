@@ -80,16 +80,28 @@ jobs:
           $version = '${{ steps.version.outputs.value }}'
           $zip = "artifacts/MasterDocumentation-v$version-win-x64.zip"
           $setup = "artifacts/MasterDocumentation-Setup-v$version.exe"
+          # Версия с суффиксом (1.2.0-beta) публикуется как предварительный выпуск: страница
+          # загрузки та же, но GitHub помечает её Pre-release и не выдаёт как «latest».
+          $prerelease = $version -match '[-+]'
+          $title = if ($prerelease) { "MasterDocumentation v$version (бета)" } else { "MasterDocumentation v$version" }
+          $warning = if ($prerelease) { @"
+
+          > **Предварительная версия.** Возможны ошибки и незаконченные функции. Для повседневной работы берите последний стабильный выпуск.
+          "@ } else { '' }
           $notes = @"
           ## Как установить
-
+          $warning
           | Файл | Кому |
           |---|---|
-          | ``MasterDocumentation-Setup-v$version.exe`` | Установщик с графическим интерфейсом: выбор папки, ярлыки, удаление через «Программы и компоненты». Права администратора не нужны. |
+          | ``MasterDocumentation-Setup-v$version.exe`` | Установщик с графическим интерфейсом: выбор папки, ярлыки, запуск сразу после установки, удаление через «Программы и компоненты». Права администратора не нужны. |
           | ``MasterDocumentation-v$version-win-x64.zip`` | Портативная версия: распакуйте архив целиком и запустите ``MasterDocumentation.exe``. |
 
           Установщик умеет и то и другое: на первом шаге выбирается «Установить на компьютер» или «Портативная версия».
 
+          Установленная копия обновляется сама: приложение проверяет новые выпуски и запускает установщик обновления — скачивать файл вручную больше не нужно.
+
           Файлы ``.sha256`` — контрольные суммы. Приложение работает полностью локально: .NET и WebView2 доустанавливать не нужно.
           "@
-          gh release create $tag $zip "$zip.sha256" $setup "$setup.sha256" --title "MasterDocumentation v$version" --notes $notes --verify-tag
+          $arguments = @($tag, $zip, "$zip.sha256", $setup, "$setup.sha256", '--title', $title, '--notes', $notes, '--verify-tag')
+          if ($prerelease) { $arguments += '--prerelease' } else { $arguments += '--latest' }
+          gh release create @arguments

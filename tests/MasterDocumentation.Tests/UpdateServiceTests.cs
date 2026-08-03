@@ -60,4 +60,50 @@ public sealed class UpdateServiceTests
     [Fact]
     public void ParseRelease_RequiresVersionTag() =>
         Assert.Null(UpdateService.ParseRelease("""{ "tag_name": "nightly", "assets": [] }"""));
+
+    [Fact]
+    public void ParseRelease_ReadsPageAndPreReleaseFlag()
+    {
+        var release = UpdateService.ParseRelease(ReleaseJson.Replace("\"draft\": false", "\"draft\": false, \"prerelease\": true, \"html_url\": \"https://example.invalid/releases/v1.4.2\""));
+
+        Assert.True(release!.IsPreRelease);
+        Assert.Equal("https://example.invalid/releases/v1.4.2", release.PageUrl);
+    }
+
+    /// <summary>
+    /// Стабильной копии предлагается только стабильный выпуск, бете — самый свежий,
+    /// включая предварительный.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "1.3.0")]
+    [InlineData(true, "1.4.0")]
+    public void SelectRelease_RespectsPreReleaseChoice(bool includePreRelease, string expected)
+    {
+        var list = $"""
+        [
+          { Release("v1.4.0", true) },
+          { Release("v1.3.0", false) },
+          { Release("v1.2.0", false) }
+        ]
+        """;
+
+        var release = UpdateService.SelectRelease(list, includePreRelease);
+
+        Assert.Equal(Version.Parse(expected), release!.Version);
+    }
+
+    [Fact]
+    public void SelectRelease_ReturnsNothingWhenOnlyPreReleasesAvailable() =>
+        Assert.Null(UpdateService.SelectRelease($"[ {Release("v1.4.0", true)} ]", includePreRelease: false));
+
+    private static string Release(string tag, bool preRelease) => $$"""
+    {
+      "tag_name": "{{tag}}",
+      "prerelease": {{(preRelease ? "true" : "false")}},
+      "html_url": "https://example.invalid/releases/{{tag}}",
+      "assets": [
+        { "name": "MasterDocumentation-Setup-{{tag}}.exe", "browser_download_url": "https://example.invalid/{{tag}}/setup.exe", "size": 1 }
+      ]
+    }
+    """;
 }
