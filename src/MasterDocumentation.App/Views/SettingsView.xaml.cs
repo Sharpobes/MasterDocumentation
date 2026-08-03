@@ -50,6 +50,19 @@ public partial class SettingsView : UserControl
         var last=Directory.Exists(AppPaths.Backups)?Directory.EnumerateFiles(AppPaths.Backups).Select(x=>new FileInfo(x)).OrderByDescending(x=>x.LastWriteTimeUtc).FirstOrDefault():null;LastBackupText.Text=last is null?"Резервных копий ещё нет":$"Последняя копия: {last.LastWriteTime:g}, {FormatBytes(last.Length)}";
     }
 
+    /// <summary>
+    /// Тему можно переключить и мимо настроек — кнопкой в строке состояния. Открытая страница
+    /// настроек про это не знает, и «Применить» вернуло бы старое значение из своего списка,
+    /// поэтому выбранное значение синхронизируется здесь и не считается правкой пользователя.
+    /// </summary>
+    public void SyncTheme(string theme)
+    {
+        if(_settings.Theme==theme)return;
+        var wasLoading=_loading;_loading=true;
+        _settings.Theme=theme;SelectCombo(ThemeBox,theme);
+        _loading=wasLoading;
+    }
+
     private static void SelectCombo(ComboBox box,string value)=>box.SelectedItem=box.Items.OfType<ComboBoxItem>().FirstOrDefault(x=>x.Content?.ToString()==value);
     private static string Selected(ComboBox box)=>(box.SelectedItem as ComboBoxItem)?.Content?.ToString()??box.Text;
     private void ShowPanel(int index,string title)

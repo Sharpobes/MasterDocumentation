@@ -36,6 +36,8 @@ public interface IDocumentStore
     void ToggleFavorite(long id);
     long Duplicate(long id);
     void EmptyTrash();
+    /// <summary>Окончательно удаляет элементы, пролежавшие в корзине дольше указанного срока. Возвращает их количество.</summary>
+    int PurgeExpiredTrash(int retentionDays);
 
     // Содержимое документа
     (FlowDocument Document, DateTime Created, DateTime Modified) LoadDocument(long id);

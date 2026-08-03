@@ -16,6 +16,7 @@ using DocumentFormat.OpenXml.Packaging;
 using OpenXmlParagraph = DocumentFormat.OpenXml.Wordprocessing.Paragraph;
 using MasterDocumentation.Models;
 using MasterDocumentation.Services;
+using MasterDocumentation.Storage;
 using MasterDocumentation.Utilities;
 using MasterDocumentation.ViewModels;
 using MasterDocumentation.Editor;
@@ -36,7 +37,7 @@ public sealed class OutlineItem : INotifyPropertyChanged
 
 public partial class MainWindow : Window
 {
-    private readonly MainViewModel _vm; private readonly SettingsService _settingsService; private ApplicationSettings _settings; private readonly System.Windows.Threading.DispatcherTimer _saveTimer; private readonly System.Windows.Threading.DispatcherTimer _draftTimer; private readonly System.Windows.Threading.DispatcherTimer _highlightTimer; private readonly ObservableCollection<AttachmentInfo> _attachments=[]; private readonly ObservableCollection<string> _tags=[]; private DocumentTab? _pendingDraft; private SettingsView? _settingsView; private bool _loading; private bool _highlighting; private bool _closeInProgress; private bool _closeCommitted; private bool _resettingHeadingSelector; private bool _updatingToolbarState; private bool _modernImageSelected; private string _selectedImageSource=""; private string _selectedImageAlt=""; private string _selectedImageCaption=""; private string _selectedImageWrap="none"; private double? _spaceBefore; private double? _spaceAfter; private double? _firstIndent; private double? _leftIndent; private double? _rightIndent; private string? _textDirection; private string _outlineSignature=""; private long _outlineDocumentId; private double _zoom=1; private Point _dragStart;
+    private readonly MainViewModel _vm; private readonly SettingsService _settingsService; private ApplicationSettings _settings; private readonly System.Windows.Threading.DispatcherTimer _saveTimer; private readonly System.Windows.Threading.DispatcherTimer _draftTimer; private readonly System.Windows.Threading.DispatcherTimer _highlightTimer; private readonly ObservableCollection<AttachmentInfo> _attachments=[]; private readonly ObservableCollection<string> _tags=[]; private readonly ObservableCollection<string> _visibleTags=[]; private readonly ObservableCollection<DocumentSearchResult> _searchResults=[]; private DocumentTab? _pendingDraft; private SettingsView? _settingsView; private bool _loading; private bool _highlighting; private bool _closeInProgress; private bool _closeCommitted; private bool _resettingHeadingSelector; private bool _updatingToolbarState; private bool _modernImageSelected; private string _selectedImageSource=""; private string _selectedImageAlt=""; private string _selectedImageCaption=""; private string _selectedImageWrap="none"; private double? _spaceBefore; private double? _spaceAfter; private double? _firstIndent; private double? _leftIndent; private double? _rightIndent; private string? _textDirection; private string _outlineSignature=""; private long _outlineDocumentId; private double _zoom=1; private Point _dragStart;
     private int _responsiveLayoutMode = -1;
     private GridLength _wideStructureWidth = new(225);
     private GridLength _widePropertiesWidth = new(265);
@@ -55,11 +56,13 @@ public partial class MainWindow : Window
     private ObservableCollection<OutlineItem> _outlineRoots=[];
     /// <summary>Минимальная ширина панели свойств: ниже неё подписи и поле состояния обрезаются.</summary>
     private const double PropertiesMinWidth=280;
+    /// <summary>Минимальная ширина библиотеки: ниже неё обрезается подпись кнопки создания.</summary>
+    private const double LibraryMinWidth=215;
     private Point _tabDragStart;
     private DocumentTab? _draggedTab;
     public MainWindow(MainViewModel viewModel, SettingsService settingsService)
     {
-        InitializeComponent(); ToastService.Initialize(this); ToastService.UnreadChanged+=(_,_)=>UpdateNotificationBadge(); UpdateNotificationBadge(); ShowPreReleaseBadge(); Tabs.HorizontalAlignment=HorizontalAlignment.Left;Tabs.MaxWidth=720;Tabs.PreviewMouseLeftButtonDown+=Tabs_PreviewMouseLeftButtonDown;Tabs.PreviewMouseMove+=Tabs_PreviewMouseMove;Tabs.PreviewMouseUp+=(_,_)=>_draggedTab=null;Tabs.PreviewMouseDown+=Tabs_PreviewMouseDown;SettingsHost.SizeChanged+=SettingsHost_SizeChanged; _vm = viewModel; _settingsService = settingsService; DataContext = _vm; AttachmentList.ItemsSource=_attachments;TagChips.ItemsSource=_tags;ModernEditor.DataFolder=AppPaths.Data;StorageLocationText.Text=AppPaths.Data;StorageLocationText.ToolTip=AppPaths.Data;
+        InitializeComponent(); ToastService.Initialize(this); ToastService.UnreadChanged+=(_,_)=>UpdateNotificationBadge(); UpdateNotificationBadge(); ShowPreReleaseBadge(); Tabs.HorizontalAlignment=HorizontalAlignment.Left;Tabs.MaxWidth=720;Tabs.PreviewMouseLeftButtonDown+=Tabs_PreviewMouseLeftButtonDown;Tabs.PreviewMouseMove+=Tabs_PreviewMouseMove;Tabs.PreviewMouseUp+=(_,_)=>_draggedTab=null;Tabs.PreviewMouseDown+=Tabs_PreviewMouseDown;SettingsHost.SizeChanged+=SettingsHost_SizeChanged; _vm = viewModel; _settingsService = settingsService; DataContext = _vm; AttachmentList.ItemsSource=_attachments;TagChips.ItemsSource=_visibleTags;TagEditorList.ItemsSource=_tags;SearchResultsList.ItemsSource=_searchResults;ModernEditor.DataFolder=AppPaths.Data;StorageLocationText.Text=AppPaths.Data;StorageLocationText.ToolTip=AppPaths.Data;
         FontFamilyBox.ItemsSource = Fonts.SystemFontFamilies.OrderBy(f => f.Source); FontFamilyBox.SelectedItem = new FontFamily("Segoe UI");
         FontSizeBox.ItemsSource = new[] { 8d, 9d, 10d, 11d, 12d, 13d, 14d, 16d, 18d, 20d, 24d, 28d, 32d, 40d, 48d, 64d }; FontSizeBox.SelectedItem = 13d;
         _settings = _settingsService.Load();ApplyInterfacePreferences(_settings);
@@ -67,7 +70,7 @@ public partial class MainWindow : Window
         _draftTimer = new() { Interval = TimeSpan.FromMilliseconds(650) }; _draftTimer.Tick += (_, _) => { _draftTimer.Stop();var tab=_pendingDraft;_pendingDraft=null;if(tab?.IsDirty!=true)return;try{DraftRecoveryService.Write(tab);}catch(Exception ex){LogService.Error("Не удалось записать аварийный черновик",ex);} };
         _highlightTimer = new() { Interval = TimeSpan.FromMilliseconds(450) }; _highlightTimer.Tick += (_, _) => { _highlightTimer.Stop(); HighlightCodeBlocks(); };
         UpdateNavigationCounts();
-        RestoreWindow();RestorePanelLayout(); Loaded += (_, _) => { ConfigureAccessibility();RecoverEmergencyDrafts(); RestoreSession(); AutoBackupIfNeeded(); if(_settings.CheckUpdates)_=CheckForUpdatesAsync(true); }; Deactivated += (_, _) => _vm.SaveAll();
+        RestoreWindow();RestorePanelLayout(); Loaded += (_, _) => { ConfigureAccessibility();RecoverEmergencyDrafts(); RestoreSession(); AutoBackupIfNeeded(); PurgeExpiredTrash(); UpdateNavigationCounts(); if(_settings.CheckUpdates)_=CheckForUpdatesAsync(true); }; Deactivated += (_, _) => _vm.SaveAll();
         AddHandler(Hyperlink.RequestNavigateEvent, new System.Windows.Navigation.RequestNavigateEventHandler((_, e) => { try { Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true }); } catch (Exception ex) { LogService.Error("Не удалось открыть ссылку", ex); } e.Handled = true; }));
     }
 
@@ -258,7 +261,6 @@ public partial class MainWindow : Window
             DocumentHeader.Visibility = Visibility.Collapsed;
             StructureTree.ItemsSource = null;
             HeadersList.ItemsSource = null;
-            TocTree.ItemsSource = null;
             SetOutlineEmptyState(true);
             LoadStartPage();
         }
@@ -273,7 +275,6 @@ public partial class MainWindow : Window
             _outlineDocumentId = _vm.SelectedTab.DocumentId;
             StructureTree.ItemsSource = null;
             HeadersList.ItemsSource = null;
-            TocTree.ItemsSource = null;
             SetOutlineEmptyState(true);
             UpdateDocumentHeader();
             var html = _vm.SelectedTab.Html;
@@ -372,7 +373,41 @@ public partial class MainWindow : Window
         UpdateDocumentHeader();
     }
     private void StartRecent_DoubleClick(object sender,MouseButtonEventArgs e){if(StartRecentList.SelectedItem is not NodeItem node)return;_vm.Open(node);ShowSelectedTab();}
-    private void GlobalSearch_PreviewKeyDown(object sender,KeyEventArgs e){if(e.Key!=Key.Enter)return;e.Handled=true;OpenGlobalSearch(GlobalSearchBox.Text);}
+    /// <summary>
+    /// Поиск подсказывает найденное списком под строкой и не трогает дерево слева: библиотека
+    /// должна оставаться на месте, пока пользователь ищет.
+    /// </summary>
+    private void GlobalSearch_TextChanged(object sender,TextChangedEventArgs e)
+    {
+        var query=GlobalSearchBox.Text.Trim();
+        _searchResults.Clear();
+        if(query.Length<2){SearchResultsPopup.IsOpen=false;return;}
+        try{foreach(var result in _vm.Database.SearchDocuments(query,limit:8))_searchResults.Add(result);}
+        catch(Exception ex){LogService.Error("Не удалось выполнить поиск",ex);}
+        SearchResultsEmptyText.Visibility=_searchResults.Count==0?Visibility.Visible:Visibility.Collapsed;
+        SearchResultsHeaderText.Visibility=_searchResults.Count==0?Visibility.Collapsed:Visibility.Visible;
+        SearchResultsPopup.IsOpen=true;
+    }
+    private void GlobalSearch_PreviewKeyDown(object sender,KeyEventArgs e)
+    {
+        if(e.Key==Key.Escape){SearchResultsPopup.IsOpen=false;e.Handled=true;return;}
+        if(e.Key!=Key.Enter)return;
+        e.Handled=true;SearchResultsPopup.IsOpen=false;OpenGlobalSearch(GlobalSearchBox.Text);
+    }
+    private void AdvancedSearch_Click(object sender,RoutedEventArgs e){SearchResultsPopup.IsOpen=false;OpenGlobalSearch(GlobalSearchBox.Text);}
+    private void SearchResult_Click(object sender,RoutedEventArgs e)
+    {
+        if((sender as FrameworkElement)?.Tag is not DocumentSearchResult result)return;
+        SearchResultsPopup.IsOpen=false;
+        OpenDocumentById(result.Id);
+    }
+    private void OpenDocumentById(long id)
+    {
+        var node=FindNode(_vm.Nodes,id);
+        if(node is null){_navigationMode="all";_vm.ShowAll();node=FindNode(_vm.Nodes,id);}
+        if(node is null)return;
+        _vm.Open(node);ShowSelectedTab();
+    }
     private void OpenGlobalSearch(string initialQuery)
     {
         var dialog=new SearchWindow(_vm.Database,initialQuery){Owner=this};
@@ -453,7 +488,7 @@ public partial class MainWindow : Window
         var signature=string.Join('\u001f',headings.Select(x=>$"{x.Level}:{x.Position}:{x.Text}"));if(_outlineDocumentId==documentId&&_outlineSignature==signature)return;_outlineDocumentId=documentId;_outlineSignature=signature;
         var roots=new ObservableCollection<OutlineItem>();var stack=new Stack<(int Level,OutlineItem Item)>();
         foreach(var heading in headings){while(stack.Count>0&&stack.Peek().Level>=heading.Level)stack.Pop();var item=new OutlineItem(heading);if(stack.Count==0)roots.Add(item);else stack.Peek().Item.Children.Add(item);stack.Push((heading.Level,item));}
-        _outlineRoots=roots;StructureTree.ItemsSource=roots;TocTree.ItemsSource=roots;HeadersList.ItemsSource=headings;
+        _outlineRoots=roots;StructureTree.ItemsSource=roots;HeadersList.ItemsSource=headings;
         SetOutlineEmptyState(headings.Count==0);
     }
     private void UpdateCurrentOutlineItem(int position)
@@ -467,7 +502,6 @@ public partial class MainWindow : Window
     private void SetOutlineEmptyState(bool isEmpty)
     {
         OutlineEmptyState.Visibility=isEmpty?Visibility.Visible:Visibility.Collapsed;
-        TocEmptyState.Visibility=isEmpty?Visibility.Visible:Visibility.Collapsed;
     }
     private void Heading_DoubleClick(object sender,MouseButtonEventArgs e){var heading=sender switch{TreeView tree when tree.SelectedItem is OutlineItem item=>item.Heading,ListBox list when list.SelectedItem is EditorHeading item=>item,_=>null};if(heading is not null)_=ModernEditor.ExecuteAsync("gotoHeading",new{pos=heading.Position});}
     private void StructureTab_Click(object sender,RoutedEventArgs e){StructureTab.IsChecked=true;HeadersTab.IsChecked=false;StructureTree.Visibility=Visibility.Visible;HeadersList.Visibility=Visibility.Collapsed;}
@@ -477,12 +511,13 @@ public partial class MainWindow : Window
     {
         var isEmpty=_vm.Nodes.Count==0;
         NavigationEmptyState.Visibility=isEmpty?Visibility.Visible:Visibility.Collapsed;
+        TrashHintText.Visibility=_navigationMode=="trash"&&!isEmpty?Visibility.Visible:Visibility.Collapsed;
         if(!isEmpty)return;
         (NavigationEmptyTitle.Text,NavigationEmptyDescription.Text,NavigationEmptyAction.Visibility,NavigationEmptyIcon.Kind)=_navigationMode switch
         {
             "favorites"=>("Нет избранных документов","Добавляйте часто используемые документы в избранное через контекстное меню.",Visibility.Collapsed,AppIconKind.Star),
             "recent"=>("Нет недавних документов","Откройте документ — он появится здесь для быстрого доступа.",Visibility.Collapsed,AppIconKind.Clock),
-            "trash"=>("Корзина пуста","Удалённые документы можно будет восстановить отсюда.",Visibility.Collapsed,AppIconKind.Trash),
+            "trash"=>("Корзина пуста",$"Удалённые документы можно восстановить отсюда в течение {DatabaseService.TrashRetentionDays} дней.",Visibility.Collapsed,AppIconKind.Trash),
             "templates"=>("Нет шаблонов","Создайте документ и выберите «Использовать как шаблон» в контекстном меню.",Visibility.Visible,AppIconKind.Template),
             _=>("Нет документов","Создайте первый документ, чтобы начать работу.",Visibility.Visible,AppIconKind.Documents)
         };
@@ -490,7 +525,31 @@ public partial class MainWindow : Window
     private void AllDocuments_Click(object sender, RoutedEventArgs e) { _navigationMode="all";_vm.ShowAll();UpdateNavigationEmptyState(); }
     private void Favorites_Click(object sender, RoutedEventArgs e) { _navigationMode="favorites";_vm.ShowFavorites();UpdateNavigationEmptyState(); }
     private void Recent_Click(object sender, RoutedEventArgs e) { _navigationMode="recent";_vm.ShowRecent(_settingsService.Load().RecentFilesCount);UpdateNavigationEmptyState(); }
-    private void Trash_Click(object sender, RoutedEventArgs e) { _navigationMode="trash";_vm.ShowTrash();UpdateNavigationEmptyState(); }
+    private void Trash_Click(object sender, RoutedEventArgs e) { _navigationMode="trash";PurgeExpiredTrash();_vm.ShowTrash();UpdateNavigationCounts(); }
+    /// <summary>Корзина сама освобождается: элементы старше срока хранения удаляются окончательно.</summary>
+    private void PurgeExpiredTrash()
+    {
+        try{if(_vm.Database.PurgeExpiredTrash(DatabaseService.TrashRetentionDays)>0)LogService.Info("Из корзины удалены элементы с истёкшим сроком хранения");}
+        catch(Exception ex){LogService.Error("Не удалось очистить просроченные элементы корзины",ex);}
+    }
+    /// <summary>Пункты корзины уместны только там, где применимы: восстановление и окончательное удаление — в корзине.</summary>
+    private void Tree_ContextMenuOpening(object sender,ContextMenuEventArgs e)
+    {
+        var inTrash=_navigationMode=="trash";var hasNode=_vm.SelectedNode is not null;
+        RestoreMenuItem.Visibility=inTrash&&hasNode?Visibility.Visible:Visibility.Collapsed;
+        DeletePermanentlyMenuItem.Visibility=inTrash&&hasNode?Visibility.Visible:Visibility.Collapsed;
+        MoveToTrashMenuItem.Visibility=!inTrash&&hasNode?Visibility.Visible:Visibility.Collapsed;
+        TrashMenuSeparator.Visibility=hasNode?Visibility.Visible:Visibility.Collapsed;
+    }
+    private static void RunTool(string file,string? arguments=null)
+    {
+        try{Process.Start(new ProcessStartInfo(file,arguments??""){UseShellExecute=true});}
+        catch(Exception ex){LogService.Error("Не удалось запустить инструмент "+file,ex);ToastService.Show("Не удалось открыть инструмент",ex.Message,ToastKind.Warning);}
+    }
+    private void QuickSnipping_Click(object sender,RoutedEventArgs e)=>RunTool("ms-screenclip:");
+    private void QuickCalculator_Click(object sender,RoutedEventArgs e)=>RunTool("calc.exe");
+    private void QuickAssets_Click(object sender,RoutedEventArgs e)=>RunTool("explorer.exe",$"\"{AppPaths.Assets}\"");
+    private void QuickDataFolder_Click(object sender,RoutedEventArgs e)=>RunTool("explorer.exe",$"\"{AppPaths.Data}\"");
     private void FavoriteNode_Click(object sender, RoutedEventArgs e) { if (_vm.SelectedNode is null || _vm.SelectedNode.IsFolder) return; _vm.Database.ToggleFavorite(_vm.SelectedNode.Id); UpdateNavigationCounts(); }
     private void CopyDocumentLink_Click(object sender,RoutedEventArgs e){if(_vm.SelectedNode is null||_vm.SelectedNode.IsFolder)return;Clipboard.SetText("masterdoc://document/"+_vm.Database.GetDocumentGuid(_vm.SelectedNode.Id));}
     private void RestoreNode_Click(object sender, RoutedEventArgs e) { if (_vm.SelectedNode is null) return; _vm.Database.Restore(_vm.SelectedNode.Id); _vm.ShowTrash(); UpdateNavigationCounts(); }
@@ -505,7 +564,15 @@ public partial class MainWindow : Window
     private void Templates_Click(object sender,RoutedEventArgs e){_navigationMode="templates";_vm.ShowTemplates();UpdateNavigationEmptyState();}
     private void Applications_Click(object sender,RoutedEventArgs e)=>new ApplicationsWindow{Owner=this}.ShowDialog();
     private void StorageHealth_Click(object sender,RoutedEventArgs e){try{var result=_vm.Database.CheckIntegrity();if(result.Equals("ok",StringComparison.OrdinalIgnoreCase))ToastService.Show("Хранилище исправно","Проверка целостности завершена.",ToastKind.Success);else MessageBox.Show(this,"Результат проверки: "+result,"Проверка хранилища",MessageBoxButton.OK,MessageBoxImage.Warning);}catch(Exception ex){MessageBox.Show(this,"Не удалось проверить хранилище: "+ex.Message,"Проверка",MessageBoxButton.OK,MessageBoxImage.Error);}}
-    private void ThemeQuickToggle_Click(object sender,RoutedEventArgs e){_vm.DarkTheme=!_vm.DarkTheme;_=ModernEditor.ExecuteAsync("setTheme",new{theme=_vm.DarkTheme?"dark":"light"});}
+    private void ThemeQuickToggle_Click(object sender,RoutedEventArgs e)
+    {
+        _vm.DarkTheme=!_vm.DarkTheme;
+        _=ModernEditor.ExecuteAsync("setTheme",new{theme=_vm.DarkTheme?"dark":"light"});
+        // Открытая страница настроек и снимок настроек окна должны знать о смене темы,
+        // иначе следующее сохранение вернёт прежнюю тему.
+        _settings.Theme=_vm.Theme;
+        _settingsView?.SyncTheme(_vm.Theme);
+    }
     private void OpenDataFolder_Click(object sender,RoutedEventArgs e){Directory.CreateDirectory(AppPaths.Data);Process.Start(new ProcessStartInfo("explorer.exe",$"\"{AppPaths.Data}\""){UseShellExecute=true});}
     private void LoadDocumentProperties()
     {
@@ -514,8 +581,8 @@ public partial class MainWindow : Window
         if(_vm.SelectedTab is null)
         {
             AttachmentsHeaderText.Text="Вложения (0)";
-            TagsButtonText.Text="＋ Добавить";
-            TagsButton.ToolTip=null;
+            TagsPopup.IsOpen=false;
+            UpdateTagChips();
             AttachmentsEmptyState.Visibility=Visibility.Visible;
             return;
         }
@@ -525,11 +592,8 @@ public partial class MainWindow : Window
         foreach(var value in _vm.Database.GetStatuses())StatusBox.Items.Add(value);
         StatusBox.SelectedItem=status;
         UpdateStatusIndicator(status);
-        var tags=_vm.Database.GetTags(_vm.SelectedTab.DocumentId);
-        foreach(var tag in tags.Take(1))_tags.Add(tag);
-        TagsButtonText.Text=tags.Count==0?"＋ Добавить":tags.Count>1?$"＋{tags.Count-1}":"＋";
-        var tagText=string.Join(", ",tags);
-        TagsButton.ToolTip=tags.Count==0?"Добавить теги":$"Теги: {tagText}. Нажмите, чтобы изменить.";
+        foreach(var tag in _vm.Database.GetTags(_vm.SelectedTab.DocumentId))_tags.Add(tag);
+        UpdateTagChips();
         foreach(var attachment in _vm.Database.GetAttachments(_vm.SelectedTab.DocumentId))_attachments.Add(attachment);
         AttachmentsHeaderText.Text=$"Вложения ({_attachments.Count})";
         AttachmentsEmptyState.Visibility=_attachments.Count==0?Visibility.Visible:Visibility.Collapsed;
@@ -541,6 +605,32 @@ public partial class MainWindow : Window
         if(_vm.SelectedTab is null){MessageBox.Show(this,"Сначала откройте документ.","Вложения");return;}var dialog=new OpenFileDialog{Title="Добавить вложение",Filter="Все файлы|*.*",Multiselect=true};if(dialog.ShowDialog(this)!=true)return;
         try{foreach(var path in dialog.FileNames){var asset=StoreAsset(path);if(_vm.Database.GetAttachments(_vm.SelectedTab.DocumentId).Any(x=>x.Sha256.Equals(asset.Hash,StringComparison.OrdinalIgnoreCase)))continue;_vm.Database.RegisterAttachment(_vm.SelectedTab.DocumentId,Path.GetFileName(path),asset.StoredName,GuessMimeType(path),asset.Size,asset.Hash);}LoadDocumentProperties();}catch(Exception ex){LogService.Error("Не удалось добавить вложение",ex);MessageBox.Show(this,"Не удалось добавить вложение: "+ex.Message,"Вложения",MessageBoxButton.OK,MessageBoxImage.Error);}
     }
+    /// <summary>
+    /// Выбор вложения переносится в текст: изображение выделяется в документе, и панель свойств
+    /// начинает править именно его, а не то, что было выбрано мышью до этого.
+    /// </summary>
+    private void AttachmentList_SelectionChanged(object sender,SelectionChangedEventArgs e)
+    {
+        var isImage=AttachmentList.SelectedItem is AttachmentInfo item&&item.MimeType.StartsWith("image/",StringComparison.OrdinalIgnoreCase);
+        ShowAttachmentInDocumentButton.IsEnabled=isImage;
+        if(isImage&&AttachmentList.SelectedItem is AttachmentInfo selected)SelectAttachmentInDocument(selected);
+    }
+    private void ShowAttachmentInDocument_Click(object sender,RoutedEventArgs e)
+    {
+        if(AttachmentList.SelectedItem is not AttachmentInfo item){ToastService.Show("Вложения","Выберите вложение в списке.",ToastKind.Information);return;}
+        SelectAttachmentInDocument(item);
+    }
+    private void SelectAttachmentInDocument(AttachmentInfo item)
+    {
+        if(!item.MimeType.StartsWith("image/",StringComparison.OrdinalIgnoreCase))
+        {
+            ToastService.Show("Вложение",item.FileName+" — не изображение, в тексте его нет.",ToastKind.Information);
+            return;
+        }
+        _=ModernEditor.ExecuteAsync("selectImage",new{src=item.StoredName});
+    }
+    private void ModernEditor_ImageMissing(object? sender,string source)=>
+        ToastService.Show("Вложения не видно в тексте","Файл прикреплён к документу, но не вставлен в содержимое.",ToastKind.Information);
     private void OpenAttachment_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;_vm.Database.MaterializeAsset(item.StoredName);var path=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(path)){MessageBox.Show(this,"Файл вложения не найден в локальном хранилище.","Вложения",MessageBoxButton.OK,MessageBoxImage.Warning);return;}Process.Start(new ProcessStartInfo(path){UseShellExecute=true});}
     private void ShowAttachmentInFolder_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;_vm.Database.MaterializeAsset(item.StoredName);var path=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(path)){MessageBox.Show(this,"Файл вложения не найден. Проверьте целостность хранилища или восстановите резервную копию.","Вложения",MessageBoxButton.OK,MessageBoxImage.Warning);return;}Process.Start(new ProcessStartInfo("explorer.exe",$"/select,\"{path}\""){UseShellExecute=true});}
     private void SaveAttachment_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;_vm.Database.MaterializeAsset(item.StoredName);var source=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(source)){MessageBox.Show(this,"Файл вложения не найден.","Вложения");return;}var dialog=new SaveFileDialog{Title="Сохранить вложение",FileName=item.FileName,Filter="Все файлы|*.*"};if(dialog.ShowDialog(this)==true)File.Copy(source,dialog.FileName,true);}
@@ -560,7 +650,56 @@ public partial class MainWindow : Window
         StatusIndicator.SetResourceReference(System.Windows.Shapes.Shape.FillProperty,key);
         AutomationProperties.SetName(StatusIndicator,$"Статус: {status??"не задан"}");
     }
-    private void Tags_Click(object sender,RoutedEventArgs e){if(_vm.SelectedTab is null)return;var current=string.Join(", ",_vm.Database.GetTags(_vm.SelectedTab.DocumentId));var prompt=new TextPrompt("Теги через запятую",current,false,true){Owner=this};if(prompt.ShowDialog()!=true)return;_vm.Database.SetTags(_vm.SelectedTab.DocumentId,prompt.Value.Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries));LoadDocumentProperties();}
+    /// <summary>
+    /// Теги правятся списком: чип убирается крестиком, а окно добавления остаётся открытым,
+    /// чтобы можно было навесить несколько тегов подряд.
+    /// </summary>
+    private void Tags_Click(object sender,RoutedEventArgs e)
+    {
+        if(_vm.SelectedTab is null){ToastService.Show("Теги","Сначала откройте документ.",ToastKind.Information);return;}
+        TagsPopup.IsOpen=!TagsPopup.IsOpen;
+        if(TagsPopup.IsOpen){TagInputBox.Text="";Dispatcher.BeginInvoke(new Action(()=>TagInputBox.Focus()));}
+    }
+    private void AddTag_Click(object sender,RoutedEventArgs e)=>AddTagFromInput();
+    private void TagInput_KeyDown(object sender,KeyEventArgs e){if(e.Key!=Key.Enter)return;AddTagFromInput();e.Handled=true;}
+    private void AddTagFromInput()
+    {
+        if(_vm.SelectedTab is null)return;
+        var value=TagInputBox.Text.Trim();
+        if(value.Length==0)return;
+        // Запятая остаётся разделителем: так можно вставить сразу несколько тегов из буфера.
+        var added=false;
+        foreach(var tag in value.Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries))
+        {
+            if(_tags.Any(x=>string.Equals(x,tag,StringComparison.CurrentCultureIgnoreCase)))continue;
+            _tags.Add(tag);added=true;
+        }
+        TagInputBox.Text="";TagInputBox.Focus();
+        if(added)SaveTags();
+    }
+    private void RemoveTag_Click(object sender,RoutedEventArgs e)
+    {
+        if(_vm.SelectedTab is null||(sender as FrameworkElement)?.DataContext is not string tag)return;
+        if(!_tags.Remove(tag))return;
+        SaveTags();
+    }
+    private void SaveTags()
+    {
+        if(_vm.SelectedTab is null)return;
+        _vm.Database.SetTags(_vm.SelectedTab.DocumentId,_tags.ToList());
+        UpdateTagChips();
+    }
+    /// <summary>В строке свойств помещается пара чипов, остальные показываются счётчиком и в окне тегов.</summary>
+    private void UpdateTagChips()
+    {
+        _visibleTags.Clear();
+        foreach(var tag in _tags.Take(1))_visibleTags.Add(tag);
+        var hidden=_tags.Count-_visibleTags.Count;
+        TagsOverflowText.Text=hidden>0?$"+{hidden}":"";
+        TagsOverflowText.Visibility=hidden>0?Visibility.Visible:Visibility.Collapsed;
+        TagEditorEmptyText.Visibility=_tags.Count==0?Visibility.Visible:Visibility.Collapsed;
+        TagsButton.ToolTip=_tags.Count==0?"Добавить теги":"Теги: "+string.Join(", ",_tags);
+    }
     private void Editor_SelectionChanged(object sender, RoutedEventArgs e)
     {
         var family = Editor.Selection.GetPropertyValue(TextElement.FontFamilyProperty); if (family != DependencyProperty.UnsetValue) FontFamilyBox.SelectedItem = family;
@@ -1064,7 +1203,7 @@ public partial class MainWindow : Window
     }
     private void RestorePanelLayout()
     {
-        if(double.TryParse(_vm.Database.GetSetting("LibraryWidth"),out var library))LibraryColumn.Width=new GridLength(Math.Clamp(library,190,360));
+        if(double.TryParse(_vm.Database.GetSetting("LibraryWidth"),out var library))LibraryColumn.Width=new GridLength(Math.Clamp(library,LibraryMinWidth,360));
         if(double.TryParse(_vm.Database.GetSetting("StructureWidth"),out var structure))StructureColumn.Width=new GridLength(Math.Clamp(structure,168,330));
         if(double.TryParse(_vm.Database.GetSetting("PropertiesWidth"),out var properties))PropertiesColumn.Width=new GridLength(Math.Clamp(properties,PropertiesMinWidth,380));
         _wideStructureWidth=StructureColumn.Width;
@@ -1093,8 +1232,8 @@ public partial class MainWindow : Window
         var nextMode=width<1040?2:width<1220?1:0;
         if(StructureColumn.Width.Value>0)_wideStructureWidth=StructureColumn.Width;
         if(PropertiesColumn.Width.Value>0)_widePropertiesWidth=PropertiesColumn.Width;
-        LibraryColumn.MinWidth=_libraryPanelCollapsed?0:190;
-        LibraryColumn.Width=_libraryPanelCollapsed?new GridLength(0):new GridLength(Math.Clamp(LibraryColumn.Width.Value,190,360));
+        LibraryColumn.MinWidth=_libraryPanelCollapsed?0:LibraryMinWidth;
+        LibraryColumn.Width=_libraryPanelCollapsed?new GridLength(0):new GridLength(Math.Clamp(LibraryColumn.Width.Value,LibraryMinWidth,360));
         WorkspaceGrid.ColumnDefinitions[1].Width=_libraryPanelCollapsed?new GridLength(0):new GridLength(6);
         var hideStructure=_structurePanelCollapsed||nextMode==2;
         StructureColumn.MinWidth=hideStructure?0:168;
@@ -1111,8 +1250,8 @@ public partial class MainWindow : Window
 
         // Панель свойств не сужается ниже PropertiesMinWidth ни при каком размере окна:
         // при меньшей ширине подписи и поле состояния обрезаются.
-        if(width<1300){LibraryColumn.MaxWidth=205;StructureColumn.MaxWidth=185;PropertiesColumn.MaxWidth=PropertiesMinWidth;}
-        else if(width<1450){LibraryColumn.MaxWidth=230;StructureColumn.MaxWidth=205;PropertiesColumn.MaxWidth=285;}
+        if(width<1300){LibraryColumn.MaxWidth=LibraryMinWidth;StructureColumn.MaxWidth=185;PropertiesColumn.MaxWidth=PropertiesMinWidth;}
+        else if(width<1450){LibraryColumn.MaxWidth=235;StructureColumn.MaxWidth=205;PropertiesColumn.MaxWidth=285;}
         else{LibraryColumn.MaxWidth=double.PositiveInfinity;StructureColumn.MaxWidth=double.PositiveInfinity;PropertiesColumn.MaxWidth=double.PositiveInfinity;}
     }
     private void EditorPanel_SizeChanged(object sender,SizeChangedEventArgs e)=>UpdateStartPageLayout(e.NewSize.Width);
@@ -1131,7 +1270,6 @@ public partial class MainWindow : Window
         AutomationProperties.SetName(Tree,"Библиотека документов");
         AutomationProperties.SetHelpText(Tree,"Стрелки перемещают выбор, Enter открывает документ, F2 переименовывает.");
         AutomationProperties.SetName(StructureTree,"Структура текущего документа");
-        AutomationProperties.SetName(TocTree,"Оглавление текущего документа");
         AutomationProperties.SetName(ModernEditor,"Редактор документа");
         AutomationProperties.SetName(DocumentTitleBox,"Название текущего документа");
         AutomationProperties.SetHelpText(DocumentTitleBox,"Введите новое название и нажмите Enter.");
@@ -1351,7 +1489,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            LibraryColumn.MinWidth=190;
+            LibraryColumn.MinWidth=LibraryMinWidth;
             StructureColumn.MinWidth=160;
             PropertiesColumn.MinWidth=210;
             LibraryColumn.Width=_focusLibraryWidth.Value>0?_focusLibraryWidth:new GridLength(255);
@@ -1376,5 +1514,5 @@ public partial class MainWindow : Window
     private void CloseCurrentTab(){var tab=_vm.SelectedTab;if(tab is null)return;_vm.Save(tab);var index=_vm.Tabs.IndexOf(tab);_vm.Tabs.Remove(tab);_vm.SelectedTab=_vm.Tabs.Count==0?null:_vm.Tabs[Math.Clamp(index-1,0,_vm.Tabs.Count-1)];ShowSelectedTab();}
     private void SelectRelativeTab(int direction){if(_vm.Tabs.Count<2)return;var index=_vm.SelectedTab is null?0:_vm.Tabs.IndexOf(_vm.SelectedTab);_vm.SelectedTab=_vm.Tabs[(index+direction+_vm.Tabs.Count)%_vm.Tabs.Count];ShowSelectedTab();}
     private void SelectTabByNumber(int index){if(index<0||index>=_vm.Tabs.Count)return;_vm.SelectedTab=_vm.Tabs[index];Tabs.SelectedItem=_vm.SelectedTab;ShowSelectedTab(true);}
-    private void About_Click(object sender, RoutedEventArgs e) => MessageBox.Show($"MasterDocumentation {AppVersion.Display}{(AppVersion.IsPreRelease?" — предварительная версия":"")}\nПереносимая локальная система документации\n.NET 8 / WPF / SQLite / TipTap", "О программе");
+    private void About_Click(object sender, RoutedEventArgs e) => MessageBox.Show($"MasterDocumentation {AppVersion.Display}{(AppVersion.IsPreRelease?" — предварительная версия":"")}\nПереносимая локальная система документации\n.NET 8 / WPF / TipTap\nХранилище: SQLite или PostgreSQL, с переносом данных между ними", "О программе");
 }

@@ -181,6 +181,22 @@ public sealed class SqliteDocumentStore : IDocumentStore
     public void ToggleFavorite(long id) { using var c = Open(); using var cmd = c.CreateCommand(); cmd.CommandText = "UPDATE Nodes SET IsFavorite=CASE IsFavorite WHEN 0 THEN 1 ELSE 0 END WHERE Id=$id"; cmd.Parameters.AddWithValue("$id", id); cmd.ExecuteNonQuery(); }
     public long Duplicate(long id) {var source=FindNode(id)??throw new InvalidOperationException("Документ не найден.");var baseTitle=source.Title+" — копия";var title=baseTitle;for(var i=2;TitleExists(source.ParentId,title);i++)title=$"{baseTitle} ({i})";using var c=Open();using var tx=c.BeginTransaction();using var cmd=c.CreateCommand();cmd.Transaction=tx;cmd.CommandText="INSERT INTO Nodes(ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt,Content,PlainText,Status,EditorJson,Html,Markdown,Zoom,Guid,Author,IsPrivate,Owner) SELECT ParentId,IsFolder,$t,(SELECT COALESCE(MAX(SortOrder)+1,0) FROM Nodes x WHERE x.ParentId IS Nodes.ParentId),$d,$d,Content,PlainText,Status,EditorJson,Html,Markdown,Zoom,lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-4'||substr(lower(hex(randomblob(2))),2)||'-'||substr('89ab',abs(random())%4+1,1)||substr(lower(hex(randomblob(2))),2)||'-'||lower(hex(randomblob(6))),Author,IsPrivate,Owner FROM Nodes WHERE Id=$id;SELECT last_insert_rowid();";cmd.Parameters.AddWithValue("$id",id);cmd.Parameters.AddWithValue("$t",title);cmd.Parameters.AddWithValue("$d",DateTime.UtcNow.ToString("O"));var copy=Convert.ToInt64(cmd.ExecuteScalar());using(var related=c.CreateCommand()){related.Transaction=tx;related.CommandText="INSERT INTO Attachments(DocumentId,FileName,StoredName,MimeType,Size,Sha256,CreatedAt) SELECT $copy,FileName,StoredName,MimeType,Size,Sha256,$d FROM Attachments WHERE DocumentId=$id;INSERT INTO DocumentTags(DocumentId,TagId) SELECT $copy,TagId FROM DocumentTags WHERE DocumentId=$id;INSERT INTO CustomProperties(DocumentId,Name,Value) SELECT $copy,Name,Value FROM CustomProperties WHERE DocumentId=$id;";related.Parameters.AddWithValue("$copy",copy);related.Parameters.AddWithValue("$id",id);related.Parameters.AddWithValue("$d",DateTime.UtcNow.ToString("O"));related.ExecuteNonQuery();}tx.Commit();RefreshSearchIndex(copy);return copy;}
     public void EmptyTrash(){using(var c=Open()){using var cmd=c.CreateCommand();cmd.CommandText="DELETE FROM Nodes WHERE DeletedAt IS NOT NULL AND (ParentId IS NULL OR ParentId NOT IN(SELECT Id FROM Nodes WHERE DeletedAt IS NOT NULL))";cmd.ExecuteNonQuery();}CleanupUnusedAssets();}
+    public int PurgeExpiredTrash(int retentionDays)
+    {
+        if(retentionDays<=0)return 0;
+        var border=DateTime.UtcNow.AddDays(-retentionDays).ToString("O");
+        int removed;
+        using(var c=Open())
+        {
+            using var cmd=c.CreateCommand();
+            // Удаляются только корни удалённых веток: вложенные узлы уходят вместе с родителем.
+            cmd.CommandText="DELETE FROM Nodes WHERE DeletedAt IS NOT NULL AND DeletedAt<$border AND (ParentId IS NULL OR ParentId NOT IN(SELECT Id FROM Nodes WHERE DeletedAt IS NOT NULL))";
+            cmd.Parameters.AddWithValue("$border",border);
+            removed=cmd.ExecuteNonQuery();
+        }
+        if(removed>0)CleanupUnusedAssets();
+        return removed;
+    }
 
     public (FlowDocument Document, DateTime Created, DateTime Modified) LoadDocument(long id)
     {

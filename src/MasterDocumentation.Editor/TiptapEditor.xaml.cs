@@ -21,6 +21,8 @@ public partial class TiptapEditor : UserControl
     public event EventHandler<JsonElement>? SelectionChanged;
     public event EventHandler<EditorFileData>? FileDropped;
     public event EventHandler<string>? AssetOpenRequested;
+    /// <summary>Вложение не найдено в тексте документа: файл прикреплён, но в содержимое не вставлен.</summary>
+    public event EventHandler<string>? ImageMissing;
     public event EventHandler<string>? LinkOpenRequested;
     public event EventHandler? EditorReady;
     public TiptapEditor(){InitializeComponent();Loaded+=async(_,_)=>await InitializeAsync();}
@@ -50,6 +52,7 @@ public partial class TiptapEditor : UserControl
         }
         if(type=="selection")SelectionChanged?.Invoke(this,root.Clone());
         if(type=="openAsset"){AssetOpenRequested?.Invoke(this,root.TryGetProperty("src",out var source)?source.GetString()??"":"");return;}
+        if(type=="imageMissing"){ImageMissing?.Invoke(this,root.TryGetProperty("src",out var missing)?missing.GetString()??"":"");return;}
         if(type=="openLink"){LinkOpenRequested?.Invoke(this,root.TryGetProperty("href",out var href)?href.GetString()??"":"");return;}
         if(type=="copyText"){var value=root.TryGetProperty("value",out var text)?text.GetString()??"":"";if(value.Length>0)Clipboard.SetText(value);return;}
         if(type=="fileData"){var documentId=root.TryGetProperty("documentId",out var id)&&id.TryGetInt64(out var parsed)?parsed:0;FileDropped?.Invoke(this,new EditorFileData(documentId,root.GetProperty("name").GetString()??"attachment",root.GetProperty("mime").GetString()??"application/octet-stream",root.GetProperty("data").GetString()??""));}

@@ -65,6 +65,7 @@
                 <MenuItem Header="Резервная копия" Click="Backup_Click" />
                 <MenuItem Header="Восстановить" Click="Restore_Click" />
                 <MenuItem Header="Экспорт" InputGestureText="Ctrl+Shift+S" Click="Export_Click" />
+                <MenuItem Header="Открытые вкладки" Click="TabsOverflow_Click" />
                 <MenuItem Header="База данных: импорт и выгрузка…" Click="DatabaseTransfer_Click" />
                 <Separator />
                 <MenuItem x:Name="LibraryPanelMenuItem" Header="Показывать библиотеку" IsCheckable="True" IsChecked="True" Click="ToggleLibraryPanel_Click" />
@@ -85,9 +86,17 @@
              а весь список открытых документов доступен по кнопке переполнения справа. -->
         <ListBox x:Name="Tabs" Grid.Column="1" ItemsSource="{Binding Tabs}" SelectedItem="{Binding SelectedTab,Mode=TwoWay}" SelectionChanged="Tabs_SelectionChanged" Background="Transparent" BorderThickness="0" Padding="0" VerticalAlignment="Center" ScrollViewer.HorizontalScrollBarVisibility="Hidden" ScrollViewer.VerticalScrollBarVisibility="Disabled" shell:WindowChrome.IsHitTestVisibleInChrome="True">
           <ListBox.ItemContainerStyle>
+            <!-- Контейнер не рисует собственную рамку: её рисует карточка вкладки,
+                 иначе у выбранной вкладки получаются две обводки. -->
             <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
               <Setter Property="AutomationProperties.Name" Value="{Binding Title}" />
               <Setter Property="ToolTipService.ShowDuration" Value="20000" />
+              <Setter Property="Padding" Value="0" />
+              <Setter Property="Template">
+                <Setter.Value>
+                  <ControlTemplate TargetType="ListBoxItem"><ContentPresenter /></ControlTemplate>
+                </Setter.Value>
+              </Setter>
             </Style>
           </ListBox.ItemContainerStyle>
           <ListBox.ItemsPanel>
@@ -155,10 +164,10 @@
             <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="×" Width="25" Height="25" MinHeight="25" Click="Settings_Click" ToolTip="Закрыть настройки" />
           </Grid>
         </Border>
-        <Button x:Name="TabsOverflowButton" Grid.Column="2" Style="{StaticResource IconButton}" VerticalAlignment="Center" Click="TabsOverflow_Click" ToolTip="Список всех открытых вкладок" AutomationProperties.Name="Список всех открытых вкладок" Visibility="{Binding Tabs.Count,Converter={StaticResource CountToVisibilityConverter},FallbackValue=Collapsed}" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-          <ui:AppIcon Kind="ChevronDown" Width="12" Height="12" />
-        </Button>
-        <Popup x:Name="TabsOverflowPopup" PlacementTarget="{Binding ElementName=TabsOverflowButton}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+        <!-- Список открытых вкладок открывается из меню приложения: отдельная кнопка в строке
+             заголовка рисовалась пустым квадратом (стиль IconButton показывает только текстовый
+             значок) и мешала. -->
+        <Popup x:Name="TabsOverflowPopup" PlacementTarget="{Binding ElementName=AppMenuButton}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
           <Border Width="280" MaxHeight="420" Padding="6" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="7">
             <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="408">
               <ItemsControl x:Name="TabsOverflowList" ItemsSource="{Binding Tabs}">
@@ -185,9 +194,36 @@
           <Border x:Name="TopSearchBorder" Width="202" Height="34" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Margin="0,0,10,0" shell:WindowChrome.IsHitTestVisibleInChrome="True">
             <DockPanel>
               <TextBlock Text="⌕" Foreground="{DynamicResource Text/Muted}" FontSize="19" Margin="9,0,5,0" VerticalAlignment="Center" />
-              <TextBox x:Name="GlobalSearchBox" AutomationProperties.Name="Поиск документов и команд" AutomationProperties.HelpText="Введите запрос и нажмите Enter. Горячая клавиша Ctrl+K." Text="{Binding Search,UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="GlobalSearch_PreviewKeyDown" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Text/Muted}" Padding="0" VerticalContentAlignment="Center" ToolTip="Поиск по названиям и содержимому (Ctrl+K)" />
+              <!-- Поиск не фильтрует дерево слева: найденное показывается списком под строкой. -->
+              <TextBox x:Name="GlobalSearchBox" AutomationProperties.Name="Поиск документов и команд" AutomationProperties.HelpText="Введите запрос: найденное появится списком под строкой. Enter открывает полный поиск. Горячая клавиша Ctrl+K." TextChanged="GlobalSearch_TextChanged" PreviewKeyDown="GlobalSearch_PreviewKeyDown" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Text/Muted}" Padding="0" VerticalContentAlignment="Center" ToolTip="Поиск по названиям и содержимому (Ctrl+K)" />
             </DockPanel>
           </Border>
+          <Popup x:Name="SearchResultsPopup" PlacementTarget="{Binding ElementName=TopSearchBorder}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" Focusable="False">
+            <Border Width="330" Padding="7" Margin="0,4,0,0" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Medium}" Effect="{StaticResource Shadow.Popup}">
+              <StackPanel>
+                <TextBlock x:Name="SearchResultsHeaderText" Text="НАЙДЕНО" Foreground="{DynamicResource Text/Muted}" FontSize="11" Margin="8,4,8,6" />
+                <ItemsControl x:Name="SearchResultsList" MaxHeight="330">
+                  <ItemsControl.Template>
+                    <ControlTemplate TargetType="ItemsControl">
+                      <ScrollViewer VerticalScrollBarVisibility="Auto"><ItemsPresenter /></ScrollViewer>
+                    </ControlTemplate>
+                  </ItemsControl.Template>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Button HorizontalContentAlignment="Stretch" Click="SearchResult_Click" Tag="{Binding}" Margin="1" Padding="8,6" Background="Transparent" BorderThickness="0">
+                        <StackPanel>
+                          <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Text="{Binding Snippet}" Foreground="{DynamicResource Text/Muted}" FontSize="11" TextTrimming="CharacterEllipsis" MaxHeight="30" />
+                        </StackPanel>
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock x:Name="SearchResultsEmptyText" Visibility="Collapsed" Text="Ничего не найдено" Foreground="{DynamicResource Text/Muted}" Margin="8,4,8,6" />
+                <Button Content="Расширенный поиск (Enter)" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" Margin="1,4,1,1" Padding="8,6" Click="AdvancedSearch_Click" />
+              </StackPanel>
+            </Border>
+          </Popup>
           <Button Style="{StaticResource IconButton}" Content="◇" ToolTip="Теги текущего документа" Click="Tags_Click" shell:WindowChrome.IsHitTestVisibleInChrome="True" />
           <Button Style="{StaticResource IconButton}" Content="?" ToolTip="Справка" Click="About_Click" shell:WindowChrome.IsHitTestVisibleInChrome="True" />
         </StackPanel>
@@ -201,7 +237,8 @@
     <!-- Основная рабочая область -->
     <Grid x:Name="WorkspaceGrid" Grid.Row="1" Margin="5,5,5,0">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition x:Name="LibraryColumn" Width="255" MinWidth="190" />
+        <!-- Ниже 215 подпись кнопки создания перестаёт помещаться. -->
+        <ColumnDefinition x:Name="LibraryColumn" Width="255" MinWidth="215" />
         <ColumnDefinition Width="6" />
         <ColumnDefinition x:Name="StructureColumn" Width="225" MinWidth="160" />
         <ColumnDefinition Width="6" />
@@ -222,10 +259,11 @@
           </Grid.RowDefinitions>
           <Grid Grid.Row="0">
             <Grid Margin="8">
-              <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="40"/></Grid.ColumnDefinitions>
-              <Button Content="＋  Создать документ" Height="36" Margin="0" Style="{StaticResource PrimaryButtonStyle}" Click="NewDocument_Click" ToolTip="Создать документ (Ctrl+N)" />
-              <Button x:Name="CreateMenuArrowButton" Grid.Column="1" Height="36" Margin="3,0,0,0" Style="{StaticResource PrimaryButtonStyle}" Click="CreateMenu_Click" ToolTip="Другие варианты создания">
-                <ui:AppIcon Kind="ChevronDown" Width="14" Height="14" Foreground="{DynamicResource Text/OnAccent}" />
+              <!-- Отступы подобраны под минимальную ширину панели: иначе обрезается и подпись, и стрелка. -->
+              <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="34"/></Grid.ColumnDefinitions>
+              <Button Content="＋  Создать документ" Height="36" Margin="0" Padding="10,7" Style="{StaticResource PrimaryButtonStyle}" Click="NewDocument_Click" ToolTip="Создать документ (Ctrl+N)" />
+              <Button x:Name="CreateMenuArrowButton" Grid.Column="1" Height="36" Margin="3,0,0,0" Padding="0" Style="{StaticResource PrimaryButtonStyle}" Click="CreateMenu_Click" ToolTip="Другие варианты создания">
+                <ui:AppIcon Kind="ChevronDown" Width="14" Height="14" Foreground="{DynamicResource Text/OnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center" />
               </Button>
             </Grid>
             <Popup x:Name="CreateMenuPopup" PlacementTarget="{Binding ElementName=CreateMenuArrowButton}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
@@ -284,6 +322,12 @@
                 <TextBlock Text="♲   Корзина" />
                 <TextBlock x:Name="TrashCountText" Grid.Column="1" Foreground="{DynamicResource Text/Muted}" Margin="12,0,0,0" />
               </Grid>
+              <!-- Очистка корзины — по самой корзине, а не в меню любого документа. -->
+              <Button.ContextMenu>
+                <ContextMenu>
+                  <MenuItem Header="Очистить корзину" Click="EmptyTrash_Click" />
+                </ContextMenu>
+              </Button.ContextMenu>
             </Button>
             <Separator />
             <Grid Margin="14,8,14,5">
@@ -307,7 +351,7 @@
             </Grid>
           </StackPanel>
           <Grid Grid.Row="2">
-          <TreeView x:Name="Tree" ItemsSource="{Binding Nodes}" SelectedItemChanged="Tree_SelectedItemChanged" MouseDoubleClick="Tree_DoubleClick" AllowDrop="True" PreviewMouseMove="Tree_MouseMove" Drop="Tree_Drop" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Text/Primary}" Margin="8,0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto">
+          <TreeView x:Name="Tree" ItemsSource="{Binding Nodes}" ContextMenuOpening="Tree_ContextMenuOpening" SelectedItemChanged="Tree_SelectedItemChanged" MouseDoubleClick="Tree_DoubleClick" AllowDrop="True" PreviewMouseMove="Tree_MouseMove" Drop="Tree_Drop" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Text/Primary}" Margin="8,0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto">
             <TreeView.ItemContainerStyle>
               <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
                 <Setter Property="IsExpanded" Value="{Binding IsExpanded,Mode=TwoWay}" />
@@ -334,11 +378,11 @@
                 <MenuItem Header="Переименовать" InputGestureText="F2" Click="Rename_Click" />
                 <Separator />
                 <MenuItem Header="Свернуть все узлы" Click="CollapseAll_Click" />
-                <Separator />
-                <MenuItem Header="Восстановить из корзины" Click="RestoreNode_Click" />
-                <MenuItem Header="Переместить в корзину" InputGestureText="Delete" Click="Delete_Click" />
-                <MenuItem Header="Удалить окончательно" Click="DeletePermanently_Click" />
-                <MenuItem Header="Очистить корзину" Click="EmptyTrash_Click" />
+                <Separator x:Name="TrashMenuSeparator" />
+                <!-- Пункты корзины показываются только там, где они применимы: см. Tree_ContextMenuOpening. -->
+                <MenuItem x:Name="RestoreMenuItem" Header="Восстановить из корзины" Click="RestoreNode_Click" />
+                <MenuItem x:Name="MoveToTrashMenuItem" Header="Переместить в корзину" InputGestureText="Delete" Click="Delete_Click" />
+                <MenuItem x:Name="DeletePermanentlyMenuItem" Header="Удалить окончательно" Click="DeletePermanently_Click" />
               </ContextMenu>
             </TreeView.ContextMenu>
           </TreeView>
@@ -348,11 +392,32 @@
               <TextBlock x:Name="NavigationEmptyDescription" Text="Создайте первый документ, чтобы начать работу." Margin="0,5,0,10" Foreground="{DynamicResource Text/Muted}" TextWrapping="Wrap" TextAlignment="Center" />
               <Button x:Name="NavigationEmptyAction" Content="Создать документ" Style="{StaticResource PrimaryButtonStyle}" Click="NewDocument_Click" />
             </StackPanel>
+            <TextBlock x:Name="TrashHintText" Visibility="Collapsed" VerticalAlignment="Bottom" Margin="12,0,12,8"
+                       Text="Удалённое хранится 30 дней, затем удаляется окончательно."
+                       Foreground="{DynamicResource Text/Muted}" FontSize="11" TextWrapping="Wrap" />
           </Grid>
-          <UniformGrid Grid.Row="3" Columns="2" Margin="6,5">
-            <Button Style="{StaticResource NavButton}" Content="▣  Шаблоны" Click="Templates_Click" ToolTip="Открыть шаблоны документов" FontSize="11" Padding="3" Margin="1" />
-            <Button Style="{StaticResource NavButton}" Content="▦  Приложения" Click="Applications_Click" ToolTip="Открыть локальные инструменты" FontSize="11" Padding="3" Margin="1" />
-          </UniformGrid>
+          <StackPanel Grid.Row="3">
+            <!-- Инструменты вынесены наружу: калькулятор и снимок экрана открываются одним нажатием. -->
+            <UniformGrid Columns="4" Margin="6,5,6,0">
+              <Button Style="{StaticResource NavButton}" Padding="3" Margin="1" Click="QuickSnipping_Click" ToolTip="Ножницы — снимок экрана" AutomationProperties.Name="Ножницы — снимок экрана">
+                <ui:AppIcon Kind="Crop" Width="15" Height="15" Foreground="{DynamicResource Text/Secondary}" HorizontalAlignment="Center" />
+              </Button>
+              <Button Style="{StaticResource NavButton}" Padding="3" Margin="1" Click="QuickCalculator_Click" ToolTip="Калькулятор" AutomationProperties.Name="Калькулятор">
+                <ui:AppIcon Kind="Calculator" Width="15" Height="15" Foreground="{DynamicResource Text/Secondary}" HorizontalAlignment="Center" />
+              </Button>
+              <Button Style="{StaticResource NavButton}" Padding="3" Margin="1" Click="QuickAssets_Click" ToolTip="Папка вложений" AutomationProperties.Name="Папка вложений">
+                <ui:AppIcon Kind="Attachment" Width="15" Height="15" Foreground="{DynamicResource Text/Secondary}" HorizontalAlignment="Center" />
+              </Button>
+              <Button Style="{StaticResource NavButton}" Padding="3" Margin="1" Click="QuickDataFolder_Click" ToolTip="Папка данных" AutomationProperties.Name="Папка данных">
+                <ui:AppIcon Kind="OpenFolder" Width="15" Height="15" Foreground="{DynamicResource Text/Secondary}" HorizontalAlignment="Center" />
+              </Button>
+            </UniformGrid>
+            <!-- Поля и кегль подобраны так, чтобы подпись «Приложения» помещалась в узкой панели. -->
+            <UniformGrid Columns="2" Margin="4,3,4,5">
+              <Button Style="{StaticResource NavButton}" Content="▣  Шаблоны" Click="Templates_Click" ToolTip="Открыть шаблоны документов" FontSize="10" Padding="2" Margin="1" />
+              <Button Style="{StaticResource NavButton}" Content="▦  Приложения" Click="Applications_Click" ToolTip="Открыть локальные инструменты" FontSize="10" Padding="2" Margin="1" />
+            </UniformGrid>
+          </StackPanel>
           <Grid Grid.Row="4" Background="{DynamicResource Background/SurfaceElevated}">
             <Grid.RowDefinitions>
               <RowDefinition Height="48" />
@@ -643,7 +708,7 @@
                 </Grid>
               </ScrollViewer>
             </Grid>
-            <editor:TiptapEditor x:Name="ModernEditor" Visibility="Collapsed" ContentChanged="ModernEditor_ContentChanged" SelectionChanged="ModernEditor_SelectionChanged" FileDropped="ModernEditor_FileDropped" AssetOpenRequested="ModernEditor_AssetOpenRequested" LinkOpenRequested="ModernEditor_LinkOpenRequested" EditorReady="ModernEditor_Ready" />
+            <editor:TiptapEditor x:Name="ModernEditor" Visibility="Collapsed" ContentChanged="ModernEditor_ContentChanged" SelectionChanged="ModernEditor_SelectionChanged" FileDropped="ModernEditor_FileDropped" AssetOpenRequested="ModernEditor_AssetOpenRequested" ImageMissing="ModernEditor_ImageMissing" LinkOpenRequested="ModernEditor_LinkOpenRequested" EditorReady="ModernEditor_Ready" />
             <RichTextBox x:Name="Editor" Visibility="Collapsed" AcceptsTab="True" Padding="38,22" BorderThickness="0" Background="{DynamicResource Background/Editor}" Foreground="{DynamicResource Text/Primary}" FontSize="15" CaretBrush="{DynamicResource Text/Primary}" VerticalScrollBarVisibility="Auto" TextChanged="Editor_TextChanged" SelectionChanged="Editor_SelectionChanged" PreviewKeyDown="Editor_PreviewKeyDown" PreviewMouseLeftButtonDown="Editor_PreviewMouseLeftButtonDown" SpellCheck.IsEnabled="True" />
           </Grid>
         </Grid>
@@ -653,9 +718,9 @@
         <Grid>
           <Grid.RowDefinitions>
             <RowDefinition Height="42" />
-            <RowDefinition Height="300" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="0" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="265" />
           </Grid.RowDefinitions>
           <Grid>
             <Grid.ColumnDefinitions>
@@ -700,7 +765,7 @@
               </ComboBox>
             </Grid>
             <TextBlock Grid.Row="2" Text="Теги" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" Margin="0,0,12,0" />
-            <Button x:Name="TagsButton" Grid.Row="2" Grid.Column="1" Click="Tags_Click" HorizontalContentAlignment="Left" Padding="6,7" FontSize="12">
+            <Border Grid.Row="2" Grid.Column="1" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Padding="5,3" VerticalAlignment="Center">
               <StackPanel Orientation="Horizontal">
                 <ItemsControl x:Name="TagChips">
                   <ItemsControl.ItemsPanel>
@@ -709,15 +774,44 @@
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
                       <!-- Скругление как у остальных элементов интерфейса: чип-«таблетка» выбивался из общего вида. -->
-                      <Border Background="{DynamicResource Accent/Soft}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Padding="7,2" Margin="0,0,5,0" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding}" Foreground="{DynamicResource Text/Secondary}" MaxWidth="85" TextTrimming="CharacterEllipsis" ToolTip="{Binding}"/>
+                      <Border Background="{DynamicResource Accent/Soft}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Padding="6,1,2,1" Margin="0,0,5,0" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                          <TextBlock Text="{Binding}" Foreground="{DynamicResource Text/Secondary}" MaxWidth="80" TextTrimming="CharacterEllipsis" ToolTip="{Binding}" VerticalAlignment="Center"/>
+                          <Button Content="×" Style="{StaticResource IconButton}" Width="17" Height="17" MinHeight="17" Margin="3,0,0,0" Padding="0" FontSize="13" Click="RemoveTag_Click" ToolTip="Убрать тег" AutomationProperties.Name="Убрать тег"/>
+                        </StackPanel>
                       </Border>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
-                <TextBlock x:Name="TagsButtonText" Text="＋ Добавить" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="TagsOverflowText" Visibility="Collapsed" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" Margin="0,0,5,0" />
+                <Button x:Name="TagsButton" Content="＋" Style="{StaticResource IconButton}" Width="22" Height="22" MinHeight="22" Padding="0" Click="Tags_Click" ToolTip="Теги документа" AutomationProperties.Name="Теги документа" />
               </StackPanel>
-            </Button>
+            </Border>
+            <Popup x:Name="TagsPopup" PlacementTarget="{Binding ElementName=TagsButton}" Placement="Bottom" HorizontalOffset="-190" StaysOpen="False" AllowsTransparency="True">
+              <Border Width="250" Padding="10" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Medium}" Effect="{StaticResource Shadow.Popup}">
+                <StackPanel>
+                  <TextBlock Text="Теги документа" FontWeight="SemiBold" Margin="0,0,0,8" />
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <TextBox x:Name="TagInputBox" Height="30" KeyDown="TagInput_KeyDown" AutomationProperties.Name="Новый тег" ToolTip="Введите тег и нажмите Enter" />
+                    <Button Grid.Column="1" Content="Добавить" MinWidth="0" Padding="10,0" Height="30" Margin="6,0,0,0" Click="AddTag_Click" />
+                  </Grid>
+                  <TextBlock Text="Enter добавляет тег, окно остаётся открытым." Foreground="{DynamicResource Text/Muted}" FontSize="11" Margin="0,6,0,8" TextWrapping="Wrap" />
+                  <ItemsControl x:Name="TagEditorList" MaxHeight="180">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Grid Margin="0,0,0,4">
+                          <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                          <TextBlock Text="{Binding}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding}" />
+                          <Button Grid.Column="1" Content="×" Style="{StaticResource IconButton}" Width="22" Height="22" MinHeight="22" Padding="0" Click="RemoveTag_Click" ToolTip="Убрать тег" AutomationProperties.Name="Убрать тег" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBlock x:Name="TagEditorEmptyText" Text="Тегов пока нет" Foreground="{DynamicResource Text/Muted}" FontSize="11" />
+                </StackPanel>
+              </Border>
+            </Popup>
             <TextBlock Grid.Row="3" Text="Создан" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" Margin="0,0,12,0" />
             <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedTab.CreatedAt,StringFormat={}{0:dd.MM.yyyy HH:mm}}" Foreground="{DynamicResource Text/Primary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             <TextBlock Grid.Row="4" Text="Изменён" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" Margin="0,0,12,0" />
@@ -725,18 +819,7 @@
             <TextBlock Grid.Row="5" Text="Автор" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" Margin="0,0,12,0" />
             <TextBlock Grid.Row="5" Grid.Column="1" Text="Локальный пользователь" Foreground="{DynamicResource Text/Primary}" TextWrapping="Wrap" VerticalAlignment="Center" />
           </Grid>
-          <Border Grid.Row="2" BorderBrush="{DynamicResource Border/Default}" BorderThickness="0,1">
-            <DockPanel Margin="14,18">
-              <TextBlock DockPanel.Dock="Top" Text="ОГЛАВЛЕНИЕ" Foreground="{DynamicResource Text/Muted}" FontSize="12" Margin="0,0,0,12" />
-              <Grid>
-                <TreeView x:Name="TocTree" ItemTemplate="{StaticResource OutlineTemplate}" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Text/Secondary}" MouseDoubleClick="Heading_DoubleClick" ScrollViewer.CanContentScroll="False" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" />
-                <StackPanel x:Name="TocEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="12" MaxWidth="205">
-                  <ui:AppIcon Kind="ListNumbered" Width="25" Height="25" Foreground="{DynamicResource Text/Muted}" HorizontalAlignment="Center" />
-                  <TextBlock Text="Оглавление появится после добавления заголовков." Margin="0,8,0,0" Foreground="{DynamicResource Text/Muted}" TextWrapping="Wrap" TextAlignment="Center" />
-                </StackPanel>
-              </Grid>
-            </DockPanel>
-          </Border>
+          <!-- Оглавление убрано из свойств: те же заголовки показывает вкладка «Заголовки» слева. -->
           <Border Grid.Row="3" BorderBrush="{DynamicResource Border/Default}" BorderThickness="0,1,0,0">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel Margin="14,16">
@@ -782,7 +865,7 @@
               <TextBlock Text="Файлы хранятся локально; одинаковые файлы не дублируются на диске." Foreground="{DynamicResource Text/Muted}" TextWrapping="Wrap" Margin="0,7,0,0" />
             </StackPanel>
             <Grid Grid.Row="1">
-            <ListBox x:Name="AttachmentList" Margin="10,0" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Text/Primary}" SelectionMode="Single">
+            <ListBox x:Name="AttachmentList" Margin="10,0" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Text/Primary}" SelectionMode="Single" SelectionChanged="AttachmentList_SelectionChanged">
               <ListBox.ItemTemplate>
                 <DataTemplate>
                   <Border Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="5" Padding="10" Margin="2,3">
@@ -808,6 +891,7 @@
             </Grid>
             <StackPanel Grid.Row="2" Margin="12,10,12,14">
               <Button Content="＋ Добавить вложение" Click="AddAttachment_Click" />
+              <Button x:Name="ShowAttachmentInDocumentButton" Content="Показать в документе" Click="ShowAttachmentInDocument_Click" ToolTip="Выделить это изображение в тексте документа" />
               <UniformGrid Columns="3">
                 <Button Content="Открыть" Click="OpenAttachment_Click" />
                 <Button Content="Показать в папке" Click="ShowAttachmentInFolder_Click" />

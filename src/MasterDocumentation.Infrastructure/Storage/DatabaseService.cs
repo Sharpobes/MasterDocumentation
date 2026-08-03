@@ -79,6 +79,9 @@ public sealed class DatabaseService : IDocumentStore
     public void ToggleFavorite(long id) => _store.ToggleFavorite(id);
     public long Duplicate(long id) => _store.Duplicate(id);
     public void EmptyTrash() => _store.EmptyTrash();
+    /// <summary>Срок хранения в корзине: после него элементы удаляются окончательно без подтверждения.</summary>
+    public const int TrashRetentionDays = 30;
+    public int PurgeExpiredTrash(int retentionDays = TrashRetentionDays) => _store.PurgeExpiredTrash(retentionDays);
 
     public (FlowDocument Document, DateTime Created, DateTime Modified) LoadDocument(long id) => _store.LoadDocument(id);
     public void SaveDocument(long id, FlowDocument document, string plainText) { _store.SaveDocument(id, document, plainText); MirrorMarkdown(id); }

@@ -519,6 +519,22 @@ public sealed class PostgresDocumentStore : IDocumentStore
         CleanupUnusedAssets();
     }
 
+    public int PurgeExpiredTrash(int retentionDays)
+    {
+        if (retentionDays <= 0) return 0;
+        int removed;
+        using (var connection = Open())
+        {
+            using var command = connection.CreateCommand();
+            // Удаляются только корни удалённых веток: вложенные узлы уходят вместе с родителем.
+            command.CommandText = "DELETE FROM Nodes WHERE DeletedAt IS NOT NULL AND DeletedAt<@border AND (ParentId IS NULL OR ParentId NOT IN(SELECT Id FROM Nodes WHERE DeletedAt IS NOT NULL))";
+            command.Parameters.AddWithValue("border", DateTime.UtcNow.AddDays(-retentionDays).ToString("O"));
+            removed = command.ExecuteNonQuery();
+        }
+        if (removed > 0) CleanupUnusedAssets();
+        return removed;
+    }
+
     public (FlowDocument Document, DateTime Created, DateTime Modified) LoadDocument(long id)
     {
         using var connection = Open();

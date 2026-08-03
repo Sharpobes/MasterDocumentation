@@ -63,19 +63,6 @@
                         </StackPanel>
                     </Button>
                     <Button Margin="0,0,0,10" Padding="14,12" HorizontalContentAlignment="Left"
-                            Click="Paint_Click" ToolTip="Открыть Paint для обработки изображения"
-                            AutomationProperties.Name="Paint — обработать изображение">
-                        <StackPanel Orientation="Horizontal">
-                            <Border Width="34" Height="34" CornerRadius="{StaticResource Radius.Small}" Background="{DynamicResource Accent/Soft}" VerticalAlignment="Top">
-                                <ui:AppIcon Kind="Image" Width="18" Height="18" Foreground="{DynamicResource Accent/Hover}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Border>
-                            <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                                <TextBlock Text="Paint" FontWeight="SemiBold" Foreground="{DynamicResource Text/Primary}" />
-                                <TextBlock Text="Обработать изображение" Foreground="{DynamicResource Text/Muted}" FontSize="12" Margin="0,2,0,0" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Button>
-                    <Button Margin="0,0,10,0" Padding="14,12" HorizontalContentAlignment="Left"
                             Click="Calculator_Click" ToolTip="Открыть Калькулятор Windows"
                             AutomationProperties.Name="Калькулятор">
                         <StackPanel Orientation="Horizontal">
@@ -88,7 +75,7 @@
                             </StackPanel>
                         </StackPanel>
                     </Button>
-                    <Button Margin="0,0,0,0" Padding="14,12" HorizontalContentAlignment="Left"
+                    <Button Margin="0,0,10,0" Padding="14,12" HorizontalContentAlignment="Left"
                             Click="Assets_Click" ToolTip="Открыть папку вложений текущего хранилища в проводнике"
                             AutomationProperties.Name="Открыть папку вложений">
                         <StackPanel Orientation="Horizontal">
