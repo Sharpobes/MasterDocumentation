@@ -83,7 +83,9 @@
                                 </ControlTemplate>
                             </ToggleButton.Template>
                         </ToggleButton>
-                        <ContentPresenter x:Name="ContentSite" Margin="{TemplateBinding Padding}" VerticalAlignment="Center" HorizontalAlignment="Left" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"/>
+                        <ContentPresenter x:Name="ContentSite" Margin="{TemplateBinding Padding}" VerticalAlignment="Center" HorizontalAlignment="Left" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"/>
+                        <!-- Текст-заглушка, пока ничего не выбрано: задаётся через Tag списка. -->
+                        <TextBlock x:Name="Placeholder" Margin="{TemplateBinding Padding}" VerticalAlignment="Center" IsHitTestVisible="False" Visibility="Collapsed" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Text/Muted}" Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"/>
                         <TextBox x:Name="PART_EditableTextBox" Visibility="Hidden" Margin="8,2,34,2" Padding="2,0" Background="Transparent" BorderThickness="0" VerticalContentAlignment="Center"/>
                         <Popup x:Name="PART_Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="None">
                             <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="360" Margin="0,4,0,0" Padding="5" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Medium}" Effect="{StaticResource Shadow.Popup}">
@@ -92,6 +94,7 @@
                         </Popup>
                     </Grid>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="SelectedItem" Value="{x:Null}"><Setter TargetName="Placeholder" Property="Visibility" Value="Visible"/></Trigger>
                         <Trigger Property="IsEditable" Value="True"><Setter TargetName="ContentSite" Property="Visibility" Value="Hidden"/><Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/></Trigger>
                         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Toggle" Property="BorderBrush" Value="{DynamicResource Border/Strong}"/></Trigger>
                         <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="Toggle" Property="BorderBrush" Value="{DynamicResource Border/Focus}"/></Trigger>

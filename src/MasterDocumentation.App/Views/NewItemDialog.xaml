@@ -43,13 +43,21 @@
             </StackPanel>
             <StackPanel Grid.Column="2">
                 <TextBlock Text="Расположение" Foreground="{DynamicResource Text/Secondary}"/>
-                <ComboBox x:Name="ParentBox" Margin="0,6,0,0" DisplayMemberPath="Name" AutomationProperties.Name="Расположение"/>
+                <ComboBox x:Name="ParentBox" Margin="0,6,0,0" Tag="Папок пока нет" AutomationProperties.Name="Расположение">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/></DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
             </StackPanel>
         </Grid>
 
         <StackPanel x:Name="TemplatePanel" Grid.Row="4" Margin="0,16,0,0">
             <TextBlock Text="Создать из шаблона" Foreground="{DynamicResource Text/Secondary}"/>
-            <ComboBox x:Name="TemplateBox" Margin="0,6,0,0" DisplayMemberPath="Title" AutomationProperties.Name="Шаблон"/>
+            <ComboBox x:Name="TemplateBox" Margin="0,6,0,0" Tag="Шаблонов пока нет" AutomationProperties.Name="Шаблон">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate><TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/></DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
             <TextBlock Text="Шаблон копирует содержимое и форматирование, но создаёт независимый документ."
                        Foreground="{DynamicResource Text/Muted}"
                        TextWrapping="Wrap"

@@ -24,10 +24,12 @@ public sealed record ToastMessage(
     string? PrimaryActionText,
     Action? PrimaryAction,
     string? SecondaryActionText,
-    Action? SecondaryAction)
+    Action? SecondaryAction,
+    DateTime CreatedAt)
 {
     public bool HasPrimaryAction => !string.IsNullOrWhiteSpace(PrimaryActionText) && PrimaryAction is not null;
     public bool HasSecondaryAction => !string.IsNullOrWhiteSpace(SecondaryActionText) && SecondaryAction is not null;
+    public string TimeText => CreatedAt.ToString("HH:mm");
 }
 
 public partial class ToastHost : UserControl
@@ -71,12 +73,14 @@ public partial class ToastHost : UserControl
             _ => (AppIconKind.Info, "State/Info")
         };
         var brush = TryFindResource(brushKey) as Brush ?? Brushes.CornflowerBlue;
-        var item = new ToastMessage(Guid.NewGuid(), title, message, icon, brush, primaryActionText, primaryAction, secondaryActionText, secondaryAction);
+        var item = new ToastMessage(Guid.NewGuid(), title, message, icon, brush, primaryActionText, primaryAction, secondaryActionText, secondaryAction, DateTime.Now);
+        ToastService.Remember(item);
         _items.Add(item);
         while (_items.Count > 4)
             Remove(_items[0]);
 
-        var timer = new DispatcherTimer { Interval = duration ?? (kind == ToastKind.Error ? TimeSpan.FromSeconds(9) : TimeSpan.FromSeconds(5)) };
+        // Карточка исчезает сама: всё, что было показано, остаётся в центре уведомлений.
+        var timer = new DispatcherTimer { Interval = duration ?? (kind == ToastKind.Error ? TimeSpan.FromSeconds(9) : TimeSpan.FromSeconds(3)) };
         timer.Tick += (_, _) =>
         {
             Remove(item);
@@ -129,8 +133,18 @@ public partial class ToastHost : UserControl
 
 public static class ToastService
 {
+    private const int HistoryLimit = 100;
     private static Window? _owner;
     private static ToastWindow? _window;
+    private static int _unread;
+
+    /// <summary>Все показанные уведомления, новые сверху: карточка исчезает, запись остаётся.</summary>
+    public static ObservableCollection<ToastMessage> History { get; } = [];
+
+    /// <summary>Количество уведомлений, показанных после последнего открытия центра уведомлений.</summary>
+    public static int Unread => _unread;
+
+    public static event EventHandler? UnreadChanged;
 
     /// <summary>Привязывает уведомления к главному окну приложения.</summary>
     public static void Initialize(Window owner)
@@ -138,6 +152,27 @@ public static class ToastService
         _owner = owner;
         _window = null;
         owner.Closed += (_, _) => { _window = null; _owner = null; };
+    }
+
+    internal static void Remember(ToastMessage item)
+    {
+        History.Insert(0, item);
+        while (History.Count > HistoryLimit) History.RemoveAt(History.Count - 1);
+        _unread++;
+        UnreadChanged?.Invoke(null, EventArgs.Empty);
+    }
+
+    public static void MarkAllRead()
+    {
+        if (_unread == 0) return;
+        _unread = 0;
+        UnreadChanged?.Invoke(null, EventArgs.Empty);
+    }
+
+    public static void ClearHistory()
+    {
+        History.Clear();
+        MarkAllRead();
     }
 
     public static void Show(

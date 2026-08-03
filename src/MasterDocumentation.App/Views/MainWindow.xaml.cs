@@ -57,7 +57,7 @@ public partial class MainWindow : Window
     private DocumentTab? _draggedTab;
     public MainWindow(MainViewModel viewModel, SettingsService settingsService)
     {
-        InitializeComponent(); ToastService.Initialize(this); Tabs.HorizontalAlignment=HorizontalAlignment.Left;Tabs.MaxWidth=720;Tabs.PreviewMouseLeftButtonDown+=Tabs_PreviewMouseLeftButtonDown;Tabs.PreviewMouseMove+=Tabs_PreviewMouseMove;Tabs.PreviewMouseUp+=(_,_)=>_draggedTab=null;Tabs.PreviewMouseDown+=Tabs_PreviewMouseDown;SettingsHost.SizeChanged+=SettingsHost_SizeChanged; _vm = viewModel; _settingsService = settingsService; DataContext = _vm; AttachmentList.ItemsSource=_attachments;TagChips.ItemsSource=_tags;ModernEditor.DataFolder=AppPaths.Data;StorageLocationText.Text=AppPaths.Data;StorageLocationText.ToolTip=AppPaths.Data;
+        InitializeComponent(); ToastService.Initialize(this); ToastService.UnreadChanged+=(_,_)=>UpdateNotificationBadge(); UpdateNotificationBadge(); Tabs.HorizontalAlignment=HorizontalAlignment.Left;Tabs.MaxWidth=720;Tabs.PreviewMouseLeftButtonDown+=Tabs_PreviewMouseLeftButtonDown;Tabs.PreviewMouseMove+=Tabs_PreviewMouseMove;Tabs.PreviewMouseUp+=(_,_)=>_draggedTab=null;Tabs.PreviewMouseDown+=Tabs_PreviewMouseDown;SettingsHost.SizeChanged+=SettingsHost_SizeChanged; _vm = viewModel; _settingsService = settingsService; DataContext = _vm; AttachmentList.ItemsSource=_attachments;TagChips.ItemsSource=_tags;ModernEditor.DataFolder=AppPaths.Data;StorageLocationText.Text=AppPaths.Data;StorageLocationText.ToolTip=AppPaths.Data;
         FontFamilyBox.ItemsSource = Fonts.SystemFontFamilies.OrderBy(f => f.Source); FontFamilyBox.SelectedItem = new FontFamily("Segoe UI");
         FontSizeBox.ItemsSource = new[] { 8d, 9d, 10d, 11d, 12d, 13d, 14d, 16d, 18d, 20d, 24d, 28d, 32d, 40d, 48d, 64d }; FontSizeBox.SelectedItem = 13d;
         _settings = _settingsService.Load();ApplyInterfacePreferences(_settings);
@@ -777,6 +777,23 @@ public partial class MainWindow : Window
     private void ZoomOut_Click(object sender,RoutedEventArgs e)=>SetZoom(_zoom-.1);
     private void ZoomIn_Click(object sender,RoutedEventArgs e)=>SetZoom(_zoom+.1);
     private void ZoomReset_Click(object sender,MouseButtonEventArgs e)=>SetZoom(1);
+    private NotificationCenterWindow? _notificationCenter;
+    private DateTime _notificationCenterClosedAt;
+    /// <summary>
+    /// Центр уведомлений открывается и закрывается одной кнопкой. Панель закрывается сама при
+    /// потере фокуса, поэтому нажатие по кнопке при открытой панели успевает закрыть её раньше
+    /// обработчика — короткая пауза не даёт ей тут же открыться снова.
+    /// </summary>
+    private void NotificationCenter_Click(object sender,RoutedEventArgs e)
+    {
+        if(_notificationCenter is not null){_notificationCenter.Close();_notificationCenter=null;return;}
+        if((DateTime.UtcNow-_notificationCenterClosedAt).TotalMilliseconds<250)return;
+        var window=new NotificationCenterWindow(this);window.Closed+=(_,_)=>{_notificationCenterClosedAt=DateTime.UtcNow;if(ReferenceEquals(_notificationCenter,window))_notificationCenter=null;};_notificationCenter=window;window.ShowAbove(NotificationCenterButton);
+    }
+    private void UpdateNotificationBadge()
+    {
+        var unread=ToastService.Unread;NotificationBadgeText.Text=unread>99?"99+":unread.ToString();NotificationBadge.Visibility=unread>0?Visibility.Visible:Visibility.Collapsed;
+    }
     private void SetZoom(double value){if(_vm.SelectedTab is null)return;_zoom=Math.Clamp(Math.Round(value,1),.5,2);ZoomText.Text=$"{_zoom*100:0}%";_vm.Database.SetZoom(_vm.SelectedTab.DocumentId,_zoom);_=ModernEditor.ExecuteAsync("setZoom",new{value=_zoom});}
     private void Link_Click(object sender, RoutedEventArgs e)
     {
@@ -898,7 +915,7 @@ public partial class MainWindow : Window
                 "Документ экспортирован",
                 path,
                 ToastKind.Success,
-                TimeSpan.FromSeconds(20),
+                TimeSpan.FromSeconds(3),
                 "Открыть файл",
                 ()=>OpenPath(path),
                 "Показать в папке",

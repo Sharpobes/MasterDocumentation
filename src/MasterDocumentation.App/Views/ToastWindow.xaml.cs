@@ -6,11 +6,11 @@ using System.Windows.Threading;
 namespace MasterDocumentation.Views;
 
 /// <summary>
-/// Отдельное окно уведомлений. Уведомления вынесены из главного окна по трём причинам:
-/// они должны быть видны поверх всех окон (включая встроенный редактор на WebView2, который
-/// рисуется собственным HWND поверх любых элементов WPF, и поверх модальных диалогов),
-/// не должны перехватывать фокус и мешать работе (окно создаётся с WS_EX_NOACTIVATE и
-/// занимает ровно размер карточек), и должны показывать видимую кнопку закрытия.
+/// Отдельное окно уведомлений. Уведомления вынесены из главного окна, потому что встроенный
+/// редактор на WebView2 рисуется собственным HWND поверх любых элементов WPF: карточка внутри
+/// разметки главного окна оказалась бы под редактором. Окно принадлежит главному (Owner), а не
+/// поверх всех: за пределами приложения его не видно, при сворачивании и скрытии главного окна
+/// оно исчезает вместе с ним. Фокус не перехватывается — WS_EX_NOACTIVATE.
 /// </summary>
 public partial class ToastWindow : Window
 {
@@ -19,8 +19,8 @@ public partial class ToastWindow : Window
     private const int WsExToolWindow = 0x00000080;
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoActivate = 0x0010;
+    private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoOwnerZOrder = 0x0200;
-    private static readonly IntPtr HwndTopmost = new(-1);
     private const double ScreenMargin = 8;
 
     private readonly Window _owner;
@@ -32,6 +32,7 @@ public partial class ToastWindow : Window
     {
         InitializeComponent();
         _owner = owner;
+        Owner = owner;
         Notifications.ItemsChanged += (_, _) => Sync();
         SizeChanged += (_, _) => UpdatePosition();
         _owner.LocationChanged += OwnerChanged;
@@ -103,7 +104,9 @@ public partial class ToastWindow : Window
                 anchor = self.TransformToDevice.Transform(new Point(workArea.Right, workArea.Bottom));
             }
 
-            SetWindowPos(handle, HwndTopmost, (int)(anchor.X - size.X - margin.X), (int)(anchor.Y - size.Y - margin.Y), 0, 0, SwpNoSize | SwpNoActivate | SwpNoOwnerZOrder);
+            // Порядок окон не трогаем: окно и так выше главного как дочернее, а поверх чужих
+            // приложений оно оказываться не должно.
+            SetWindowPos(handle, IntPtr.Zero, (int)(anchor.X - size.X - margin.X), (int)(anchor.Y - size.Y - margin.Y), 0, 0, SwpNoSize | SwpNoActivate | SwpNoZOrder | SwpNoOwnerZOrder);
         }
         catch (InvalidOperationException)
         {

@@ -76,7 +76,9 @@
             </Button.ContextMenu>
           </Button>
         </StackPanel>
-        <ListBox x:Name="Tabs" Grid.Column="1" ItemsSource="{Binding Tabs}" SelectedItem="{Binding SelectedTab,Mode=TwoWay}" SelectionChanged="Tabs_SelectionChanged" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+        <!-- Полоса прокрутки отключена: она забирает высоту у строки заголовка и обрезает вкладки,
+             а весь список открытых документов доступен по кнопке переполнения справа. -->
+        <ListBox x:Name="Tabs" Grid.Column="1" ItemsSource="{Binding Tabs}" SelectedItem="{Binding SelectedTab,Mode=TwoWay}" SelectionChanged="Tabs_SelectionChanged" Background="Transparent" BorderThickness="0" Padding="0" VerticalAlignment="Center" ScrollViewer.HorizontalScrollBarVisibility="Hidden" ScrollViewer.VerticalScrollBarVisibility="Disabled" shell:WindowChrome.IsHitTestVisibleInChrome="True">
           <ListBox.ItemContainerStyle>
             <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
               <Setter Property="AutomationProperties.Name" Value="{Binding Title}" />
@@ -90,7 +92,7 @@
           </ListBox.ItemsPanel>
           <ListBox.ItemTemplate>
             <DataTemplate>
-              <Border x:Name="TabSurface" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Margin="3,7" Padding="8,0" Height="40" MinWidth="130" MaxWidth="235">
+              <Border x:Name="TabSurface" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Margin="3,0" Padding="8,0" Height="38" VerticalAlignment="Center" MinWidth="130" MaxWidth="235">
                 <Border.ToolTip>
                   <ToolTip>
                     <StackPanel MaxWidth="360">
@@ -136,7 +138,7 @@
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
-        <Border x:Name="SettingsTabHeader" Grid.Column="1" Visibility="Collapsed" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Margin="6,7" Padding="10,0" Height="40" Width="210" HorizontalAlignment="Left" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+        <Border x:Name="SettingsTabHeader" Grid.Column="1" Visibility="Collapsed" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Margin="6,0" Padding="10,0" Height="38" VerticalAlignment="Center" Width="210" HorizontalAlignment="Left" shell:WindowChrome.IsHitTestVisibleInChrome="True">
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto" />
@@ -814,6 +816,15 @@
     </Grid>
     <!-- Строка состояния -->
     <Border Grid.Row="2" Background="{DynamicResource Background/App}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="0,1,0,0">
+      <Grid>
+      <Button x:Name="NotificationCenterButton" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="10,0,0,0" Height="26" MinHeight="26" Padding="7,0" Click="NotificationCenter_Click" ToolTip="Все уведомления" AutomationProperties.Name="Все уведомления">
+        <StackPanel Orientation="Horizontal">
+          <ui:AppIcon Kind="Notification" Width="15" Height="15" Foreground="{DynamicResource Text/Secondary}" VerticalAlignment="Center" />
+          <Border x:Name="NotificationBadge" Visibility="Collapsed" Margin="6,0,0,0" MinWidth="17" Height="16" Padding="4,0" CornerRadius="8" Background="{DynamicResource Accent/Primary}" VerticalAlignment="Center">
+            <TextBlock x:Name="NotificationBadgeText" Text="0" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Text/OnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+        </StackPanel>
+      </Button>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0">
         <TextBlock x:Name="DocumentStatsText" Text="Слов: 0   Символов: 0" Foreground="{DynamicResource Text/Muted}" />
         <TextBlock x:Name="SaveStatusText" Text="Сохранено" Foreground="{DynamicResource Text/Muted}" MinWidth="150" Margin="30,0,0,0" Cursor="Hand" MouseLeftButtonDown="SaveStatus_Click" ToolTip="Состояние сохранения. При ошибке нажмите, чтобы повторить." />
@@ -823,6 +834,7 @@
         <TextBlock x:Name="ZoomText" Text="100%" Foreground="{DynamicResource Text/Muted}" Margin="9,0" MouseLeftButtonDown="ZoomReset_Click" ToolTip="Сбросить масштаб" />
         <Button Style="{StaticResource IconButton}" Width="26" Height="26" MinHeight="26" Content="＋" ToolTip="Увеличить масштаб" Click="ZoomIn_Click" />
       </StackPanel>
+      </Grid>
     </Border>
   </Grid>
 </Window>

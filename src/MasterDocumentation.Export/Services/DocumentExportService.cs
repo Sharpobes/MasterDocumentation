@@ -254,6 +254,9 @@ public sealed class DocumentExportService
 
     // ---- PDF ---------------------------------------------------------------
 
+    /// <summary>Заголовок документа с местом, куда ведёт навигация: страница и отступ сверху.</summary>
+    private sealed record PdfHeading(int Level, string Text, PdfPage Page, int PageIndex, double Top);
+
     private static void PdfFromBlocks(IReadOnlyList<ExportBlock> blocks, string title, string path)
     {
         const double margin = 48;
@@ -266,6 +269,7 @@ public sealed class DocumentExportService
         var body = new XFont("Segoe UI", 11);
         var code = new XFont("Consolas", 10);
         var titleFont = new XFont("Segoe UI", 20, XFontStyleEx.Bold);
+        var headings = new List<PdfHeading>();
         var y = margin;
 
         void NewPage()
@@ -304,8 +308,13 @@ public sealed class DocumentExportService
                 case BlockKind.Heading:
                     {
                         var size = block.Level switch { 1 => 17d, 2 => 15d, 3 => 13.5, _ => 12d };
+                        var font = new XFont("Segoe UI", size, XFontStyleEx.Bold);
                         y += 8;
-                        DrawLines(block.Text, new XFont("Segoe UI", size, XFontStyleEx.Bold), 0, XBrushes.Black);
+                        // Место заголовка фиксируется после возможного перехода на новую страницу,
+                        // иначе закладка укажет на конец предыдущей.
+                        Reserve(font.GetHeight() * 1.18);
+                        headings.Add(new(block.Level, block.Text, page, pdf.PageCount - 1, y));
+                        DrawLines(block.Text, font, 0, XBrushes.Black);
                         y += 4;
                         break;
                     }
@@ -363,7 +372,89 @@ public sealed class DocumentExportService
         }
 
         gfx.Dispose();
+        BuildNavigation(pdf, headings, margin);
         pdf.Save(path);
+    }
+
+    /// <summary>
+    /// Навигация по документу: закладки PDF и страница оглавления со ссылками. Оглавление
+    /// вставляется в начало уже свёрстанного документа, поэтому номера страниц заголовков
+    /// сдвигаются на его размер; закладки ссылаются на сами объекты страниц и от вставки
+    /// не зависят.
+    /// </summary>
+    private static void BuildNavigation(PdfDocument pdf, IReadOnlyList<PdfHeading> headings, double margin)
+    {
+        if (headings.Count == 0) return;
+
+        var entryFont = new XFont("Segoe UI", 11);
+        var tocTitleFont = new XFont("Segoe UI", 16, XFontStyleEx.Bold);
+        var lineHeight = entryFont.GetHeight() * 1.55;
+        var pageHeight = pdf.Pages[0].Height.Point;
+        var pageWidth = pdf.Pages[0].Width.Point;
+        var usableHeight = pageHeight - margin * 2;
+        var firstPageHeight = usableHeight - tocTitleFont.GetHeight() * 1.18 - 12;
+        var perPage = Math.Max(1, (int)(usableHeight / lineHeight));
+        var onFirstPage = Math.Max(1, (int)(firstPageHeight / lineHeight));
+        var tocPageCount = headings.Count <= onFirstPage ? 1 : 1 + (int)Math.Ceiling((headings.Count - onFirstPage) / (double)perPage);
+
+        var tocPages = new List<PdfPage>();
+        for (var index = 0; index < tocPageCount; index++)
+        {
+            var tocPage = pdf.Pages.Insert(index);
+            tocPage.Size = PdfSharp.PageSize.A4;
+            tocPages.Add(tocPage);
+        }
+
+        var entry = 0;
+        for (var index = 0; index < tocPages.Count && entry < headings.Count; index++)
+        {
+            var tocPage = tocPages[index];
+            using var gfx = XGraphics.FromPdfPage(tocPage);
+            var y = margin;
+            if (index == 0)
+            {
+                gfx.DrawString("Оглавление", tocTitleFont, XBrushes.Black, new XRect(margin, y, pageWidth - margin * 2, tocTitleFont.GetHeight() * 1.18), XStringFormats.TopLeft);
+                y += tocTitleFont.GetHeight() * 1.18 + 12;
+            }
+            while (entry < headings.Count && y + lineHeight <= pageHeight - margin)
+            {
+                var heading = headings[entry++];
+                var indent = Math.Min(4, Math.Max(1, heading.Level) - 1) * 16d;
+                var number = (tocPageCount + heading.PageIndex + 1).ToString();
+                var numberWidth = gfx.MeasureString(number, entryFont).Width;
+                var textLeft = margin + indent;
+                var textWidth = pageWidth - margin - numberWidth - 10 - textLeft;
+                gfx.DrawString(Ellipsize(gfx, heading.Text, entryFont, textWidth), entryFont, XBrushes.Black, new XRect(textLeft, y, textWidth, lineHeight), XStringFormats.TopLeft);
+                gfx.DrawString(number, entryFont, XBrushes.Black, new XRect(pageWidth - margin - numberWidth, y, numberWidth, lineHeight), XStringFormats.TopLeft);
+                // Прямоугольник ссылки задаётся в координатах PDF: начало отсчёта — левый нижний угол.
+                var rect = new PdfRectangle(new XPoint(textLeft, pageHeight - y - lineHeight), new XPoint(pageWidth - margin, pageHeight - y));
+                tocPage.AddDocumentLink(rect, tocPageCount + heading.PageIndex + 1);
+                y += lineHeight;
+            }
+        }
+
+        pdf.PageMode = PdfPageMode.UseOutlines;
+        var opened = pdf.Outlines.Add("Оглавление", tocPages[0], true);
+        opened.PageDestinationType = PdfPageDestinationType.Fit;
+        var stack = new List<(int Level, PdfOutline Outline)>();
+        foreach (var heading in headings)
+        {
+            while (stack.Count > 0 && stack[^1].Level >= heading.Level) stack.RemoveAt(stack.Count - 1);
+            var collection = stack.Count == 0 ? pdf.Outlines : stack[^1].Outline.Outlines;
+            var outline = collection.Add(heading.Text, heading.Page, true);
+            outline.PageDestinationType = PdfPageDestinationType.FitH;
+            outline.Top = heading.Page.Height.Point - heading.Top;
+            stack.Add((heading.Level, outline));
+        }
+    }
+
+    private static string Ellipsize(XGraphics gfx, string text, XFont font, double width)
+    {
+        text = (text ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
+        if (width <= 0 || gfx.MeasureString(text, font).Width <= width) return text;
+        var take = text.Length;
+        while (take > 1 && gfx.MeasureString(text[..take] + "…", font).Width > width) take--;
+        return text[..take] + "…";
     }
 
     private static IEnumerable<string> WrapLines(XGraphics gfx, string text, XFont font, double width)
