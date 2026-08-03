@@ -52,6 +52,9 @@
             <ui:AppIcon Kind="App" Width="14" Height="14" Foreground="{DynamicResource Text/OnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center" />
           </Border>
           <TextBlock Text="MasterDocumentation" Foreground="{DynamicResource Text/Primary}" FontWeight="SemiBold" Margin="12,0" VerticalAlignment="Center" />
+          <Border x:Name="PreReleaseBadge" Visibility="Collapsed" Margin="0,0,10,0" Padding="6,1" CornerRadius="4" Background="{DynamicResource State/WarningSoft}" BorderBrush="{DynamicResource State/Warning}" BorderThickness="1" VerticalAlignment="Center">
+            <TextBlock x:Name="PreReleaseBadgeText" Text="BETA" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource State/Warning}" />
+          </Border>
           <Button x:Name="AppMenuButton" Style="{StaticResource IconButton}" Content="☰" FontSize="15" ToolTip="Меню приложения" Click="AppMenu_Click" shell:WindowChrome.IsHitTestVisibleInChrome="True">
             <Button.ContextMenu>
               <ContextMenu>
@@ -70,6 +73,7 @@
                 <MenuItem Header="Режим фокусировки" InputGestureText="Ctrl+Shift+F" Click="FocusMode_Click" />
                 <Separator />
                 <MenuItem Header="Тёмная тема" IsCheckable="True" IsChecked="{Binding DarkTheme}" />
+                <MenuItem Header="Проверить обновления" Click="CheckUpdates_Click" />
                 <MenuItem Header="О программе" Click="About_Click" />
                 <MenuItem Header="Выход" InputGestureText="Alt+F4" Click="Exit_Click" />
               </ContextMenu>

@@ -1,7 +1,6 @@
 <Application x:Class="MasterDocumentation.Setup.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             StartupUri="SetupWindow.xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Application.Resources>
         <SolidColorBrush x:Key="Surface.App" Color="#FF0E151E"/>
         <SolidColorBrush x:Key="Surface.Card" Color="#FF16212D"/>

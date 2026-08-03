@@ -1,5 +1,6 @@
 using System.IO;
 using System.IO.Compression;
+using System.Reflection;
 using Microsoft.Win32;
 
 namespace MasterDocumentation.Setup;
@@ -39,10 +40,17 @@ public static class InstallEngine
     public static string DefaultPortableDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ApplicationName);
     public static string DefaultDataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ApplicationName, "Data");
 
+    /// <summary>Информационная версия: только в ней сохраняется суффикс предрелиза («1.2.0-beta»).</summary>
     public static string Version
     {
         get
         {
+            var informational = typeof(InstallEngine).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (!string.IsNullOrWhiteSpace(informational))
+            {
+                var metadata = informational.IndexOf('+');
+                return (metadata >= 0 ? informational[..metadata] : informational).Trim();
+            }
             var version = typeof(InstallEngine).Assembly.GetName().Version;
             return version is null ? "1.0.0" : $"{version.Major}.{version.Minor}.{version.Build}";
         }
@@ -73,7 +81,7 @@ public static class InstallEngine
             if (!destination.StartsWith(target.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 continue; // защита от путей вида ../ внутри архива
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            entry.ExtractToFile(destination, true);
+            ExtractWithRetry(entry, destination);
             done++;
             if (done % 25 == 0 || done == total)
                 progress.Report(new($"Распаковка файлов… {done} из {total}", done * 92d / total));
@@ -103,6 +111,30 @@ public static class InstallEngine
         }
 
         progress.Report(new("Готово", 100));
+    }
+
+    /// <summary>
+    /// При обновлении поверх работавшей копии файл может быть ещё занят — процессы редактора
+    /// (WebView2) закрываются с задержкой. Несколько повторов надёжнее, чем прерывать обновление.
+    /// </summary>
+    private static void ExtractWithRetry(ZipArchiveEntry entry, string destination)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                entry.ExtractToFile(destination, true);
+                return;
+            }
+            catch (IOException) when (attempt < 5)
+            {
+                Thread.Sleep(400 * attempt);
+            }
+            catch (UnauthorizedAccessException) when (attempt < 5)
+            {
+                Thread.Sleep(400 * attempt);
+            }
+        }
     }
 
     private static void EnsureWritable(string target)

@@ -57,7 +57,7 @@ public partial class MainWindow : Window
     private DocumentTab? _draggedTab;
     public MainWindow(MainViewModel viewModel, SettingsService settingsService)
     {
-        InitializeComponent(); ToastService.Initialize(this); ToastService.UnreadChanged+=(_,_)=>UpdateNotificationBadge(); UpdateNotificationBadge(); Tabs.HorizontalAlignment=HorizontalAlignment.Left;Tabs.MaxWidth=720;Tabs.PreviewMouseLeftButtonDown+=Tabs_PreviewMouseLeftButtonDown;Tabs.PreviewMouseMove+=Tabs_PreviewMouseMove;Tabs.PreviewMouseUp+=(_,_)=>_draggedTab=null;Tabs.PreviewMouseDown+=Tabs_PreviewMouseDown;SettingsHost.SizeChanged+=SettingsHost_SizeChanged; _vm = viewModel; _settingsService = settingsService; DataContext = _vm; AttachmentList.ItemsSource=_attachments;TagChips.ItemsSource=_tags;ModernEditor.DataFolder=AppPaths.Data;StorageLocationText.Text=AppPaths.Data;StorageLocationText.ToolTip=AppPaths.Data;
+        InitializeComponent(); ToastService.Initialize(this); ToastService.UnreadChanged+=(_,_)=>UpdateNotificationBadge(); UpdateNotificationBadge(); ShowPreReleaseBadge(); Tabs.HorizontalAlignment=HorizontalAlignment.Left;Tabs.MaxWidth=720;Tabs.PreviewMouseLeftButtonDown+=Tabs_PreviewMouseLeftButtonDown;Tabs.PreviewMouseMove+=Tabs_PreviewMouseMove;Tabs.PreviewMouseUp+=(_,_)=>_draggedTab=null;Tabs.PreviewMouseDown+=Tabs_PreviewMouseDown;SettingsHost.SizeChanged+=SettingsHost_SizeChanged; _vm = viewModel; _settingsService = settingsService; DataContext = _vm; AttachmentList.ItemsSource=_attachments;TagChips.ItemsSource=_tags;ModernEditor.DataFolder=AppPaths.Data;StorageLocationText.Text=AppPaths.Data;StorageLocationText.ToolTip=AppPaths.Data;
         FontFamilyBox.ItemsSource = Fonts.SystemFontFamilies.OrderBy(f => f.Source); FontFamilyBox.SelectedItem = new FontFamily("Segoe UI");
         FontSizeBox.ItemsSource = new[] { 8d, 9d, 10d, 11d, 12d, 13d, 14d, 16d, 18d, 20d, 24d, 28d, 32d, 40d, 48d, 64d }; FontSizeBox.SelectedItem = 13d;
         _settings = _settingsService.Load();ApplyInterfacePreferences(_settings);
@@ -65,7 +65,7 @@ public partial class MainWindow : Window
         _draftTimer = new() { Interval = TimeSpan.FromMilliseconds(650) }; _draftTimer.Tick += (_, _) => { _draftTimer.Stop();var tab=_pendingDraft;_pendingDraft=null;if(tab?.IsDirty!=true)return;try{DraftRecoveryService.Write(tab);}catch(Exception ex){LogService.Error("Не удалось записать аварийный черновик",ex);} };
         _highlightTimer = new() { Interval = TimeSpan.FromMilliseconds(450) }; _highlightTimer.Tick += (_, _) => { _highlightTimer.Stop(); HighlightCodeBlocks(); };
         UpdateNavigationCounts();
-        RestoreWindow();RestorePanelLayout(); Loaded += (_, _) => { ConfigureAccessibility();RecoverEmergencyDrafts(); RestoreSession(); AutoBackupIfNeeded(); }; Deactivated += (_, _) => _vm.SaveAll();
+        RestoreWindow();RestorePanelLayout(); Loaded += (_, _) => { ConfigureAccessibility();RecoverEmergencyDrafts(); RestoreSession(); AutoBackupIfNeeded(); if(_settings.CheckUpdates)_=CheckForUpdatesAsync(true); }; Deactivated += (_, _) => _vm.SaveAll();
         AddHandler(Hyperlink.RequestNavigateEvent, new System.Windows.Navigation.RequestNavigateEventHandler((_, e) => { try { Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true }); } catch (Exception ex) { LogService.Error("Не удалось открыть ссылку", ex); } e.Handled = true; }));
     }
 
@@ -777,6 +777,60 @@ public partial class MainWindow : Window
     private void ZoomOut_Click(object sender,RoutedEventArgs e)=>SetZoom(_zoom-.1);
     private void ZoomIn_Click(object sender,RoutedEventArgs e)=>SetZoom(_zoom+.1);
     private void ZoomReset_Click(object sender,MouseButtonEventArgs e)=>SetZoom(1);
+    /// <summary>Предрелизная копия помечается в заголовке: по сборке иначе не видно, что она бета.</summary>
+    private void ShowPreReleaseBadge()
+    {
+        if(!AppVersion.IsPreRelease)return;
+        PreReleaseBadgeText.Text=AppVersion.Display.Split('-')[1].ToUpperInvariant();
+        PreReleaseBadge.ToolTip=$"Предварительная версия {AppVersion.Display}";
+        PreReleaseBadge.Visibility=Visibility.Visible;
+    }
+    private bool _updateOffered;
+    /// <summary>
+    /// Обновление ставится тем же установщиком, что и само приложение: приложение скачивает его,
+    /// запускает в режиме обновления и закрывается — установщик распакует новую версию в ту же
+    /// папку и запустит приложение обратно. Скачивать релиз вручную не нужно.
+    /// </summary>
+    private async Task CheckForUpdatesAsync(bool silent)
+    {
+        if(_updateOffered)return;
+        var release=await UpdateService.CheckAsync();
+        if(release is null)
+        {
+            if(!silent)ToastService.Show("Обновлений нет",$"Установлена последняя версия {UpdateService.CurrentVersion}.",ToastKind.Information);
+            return;
+        }
+        _updateOffered=true;
+        ToastService.Show(
+            $"Доступна версия {release.Version}",
+            $"Текущая версия {UpdateService.CurrentVersion}. Обновление скачается и установится само, документы останутся на месте.",
+            ToastKind.Information,
+            TimeSpan.FromSeconds(12),
+            "Обновить",
+            ()=>Dispatcher.BeginInvoke(new Action(async()=>await InstallUpdateAsync(release))));
+    }
+    private async Task InstallUpdateAsync(UpdateRelease release)
+    {
+        if(OperationOverlay.Visibility==Visibility.Visible)return;
+        if(MessageBox.Show(this,$"Обновить MasterDocumentation до версии {release.Version}?\n\nПриложение закроется, установщик обновит папку {UpdateService.InstallDirectory} и запустит его снова.\n\nДокументация и настройки сохранятся.","Обновление",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
+        OperationTitle.Text="Загрузка обновления";OperationDescription.Text=$"Скачивается установщик версии {release.Version}. Не закрывайте приложение.";OperationOverlay.Visibility=Visibility.Visible;
+        AutomationProperties.SetName(OperationOverlay,OperationTitle.Text);
+        try
+        {
+            var progress=new Progress<double>(value=>OperationDescription.Text=$"Скачивается установщик версии {release.Version}: {value:0}%.");
+            var installer=await UpdateService.DownloadAsync(release,progress);
+            _vm.SaveAll();
+            UpdateService.LaunchInstaller(installer);
+            Application.Current.Shutdown();
+        }
+        catch(Exception ex)
+        {
+            LogService.Error("Не удалось обновить приложение",ex);
+            OperationOverlay.Visibility=Visibility.Collapsed;
+            MessageBox.Show(this,ex.Message,"Обновление",MessageBoxButton.OK,MessageBoxImage.Error);
+        }
+    }
+    private async void CheckUpdates_Click(object sender,RoutedEventArgs e)=>await CheckForUpdatesAsync(false);
     private NotificationCenterWindow? _notificationCenter;
     private DateTime _notificationCenterClosedAt;
     /// <summary>
@@ -1308,5 +1362,5 @@ public partial class MainWindow : Window
     private void CloseCurrentTab(){var tab=_vm.SelectedTab;if(tab is null)return;_vm.Save(tab);var index=_vm.Tabs.IndexOf(tab);_vm.Tabs.Remove(tab);_vm.SelectedTab=_vm.Tabs.Count==0?null:_vm.Tabs[Math.Clamp(index-1,0,_vm.Tabs.Count-1)];ShowSelectedTab();}
     private void SelectRelativeTab(int direction){if(_vm.Tabs.Count<2)return;var index=_vm.SelectedTab is null?0:_vm.Tabs.IndexOf(_vm.SelectedTab);_vm.SelectedTab=_vm.Tabs[(index+direction+_vm.Tabs.Count)%_vm.Tabs.Count];ShowSelectedTab();}
     private void SelectTabByNumber(int index){if(index<0||index>=_vm.Tabs.Count)return;_vm.SelectedTab=_vm.Tabs[index];Tabs.SelectedItem=_vm.SelectedTab;ShowSelectedTab(true);}
-    private void About_Click(object sender, RoutedEventArgs e) => MessageBox.Show("MasterDocumentation\nПереносимая локальная система документации\n.NET 8 / WPF / SQLite / TipTap", "О программе");
+    private void About_Click(object sender, RoutedEventArgs e) => MessageBox.Show($"MasterDocumentation {AppVersion.Display}{(AppVersion.IsPreRelease?" — предварительная версия":"")}\nПереносимая локальная система документации\n.NET 8 / WPF / SQLite / TipTap", "О программе");
 }

@@ -12,7 +12,9 @@ public partial class SetupWindow : Window
     private bool _finished;
     private string _installedDirectory = "";
 
-    public SetupWindow()
+    public SetupWindow() : this(null) { }
+
+    public SetupWindow(UpdateRequest? update)
     {
         InitializeComponent();
         SubtitleText.Text = $"Версия {InstallEngine.Version} · локальная документация без облака и регистрации";
@@ -22,6 +24,81 @@ public partial class SetupWindow : Window
             ? "Права администратора не требуются."
             : "Внимание: в этом файле нет дистрибутива приложения.";
         PrimaryButton.IsEnabled = PayloadArchive.Exists;
+        if (update is not null) Loaded += async (_, _) => await RunUpdateAsync(update);
+    }
+
+    /// <summary>
+    /// Обновление уже установленной копии: выбирать нечего, поэтому шаг параметров пропускается.
+    /// Файлы приложения заняты работающим процессом, поэтому сначала дожидаемся его закрытия.
+    /// </summary>
+    private async Task RunUpdateAsync(UpdateRequest update)
+    {
+        Title = "Обновление MasterDocumentation";
+        _running = true;
+        OptionsPanel.Visibility = Visibility.Collapsed;
+        ProgressPanel.Visibility = Visibility.Visible;
+        PrimaryButton.Visibility = Visibility.Collapsed;
+        CancelButton.Visibility = Visibility.Collapsed;
+        StatusText.Text = "Не закрывайте окно до конца обновления.";
+        ProgressText.Text = "Ожидание закрытия приложения…";
+
+        var options = new InstallOptions
+        {
+            Mode = update.Mode,
+            TargetDirectory = update.TargetDirectory,
+            // Ярлыки при обновлении не трогаем: пользователь мог удалить или перенести их сам.
+            DesktopShortcut = false,
+            StartMenuShortcut = false,
+            LaunchAfterSetup = update.Relaunch,
+        };
+        var progress = new Progress<InstallProgress>(value =>
+        {
+            ProgressText.Text = value.Text;
+            ProgressBarControl.Value = value.Value;
+        });
+
+        try
+        {
+            if (!await WaitForApplicationAsync(update.WaitForProcessId))
+                throw new InvalidOperationException("MasterDocumentation не закрылся за отведённое время. Закройте приложение и запустите обновление ещё раз.");
+            await Task.Run(() => InstallEngine.Run(options, progress, _cancellation.Token), _cancellation.Token);
+            _installedDirectory = Path.GetFullPath(options.TargetDirectory);
+            if (update.Relaunch) LaunchApplication();
+            Close();
+        }
+        catch (Exception ex)
+        {
+            ProgressPanel.Visibility = Visibility.Collapsed;
+            DonePanel.Visibility = Visibility.Visible;
+            DoneTitle.Text = "Обновление не выполнено";
+            DoneTitle.Foreground = (System.Windows.Media.Brush)FindResource("State.Error");
+            DoneText.Text = ex.Message + "\n\nУстановленная версия осталась работоспособной.";
+            PrimaryButton.Content = "Закрыть";
+            PrimaryButton.Visibility = Visibility.Visible;
+            PrimaryButton.IsEnabled = true;
+            _finished = true;
+            StatusText.Text = "";
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private static async Task<bool> WaitForApplicationAsync(int? processId)
+    {
+        if (processId is null) return true;
+        try
+        {
+            using var process = Process.GetProcessById(processId.Value);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (ArgumentException) { /* процесс уже завершился */ }
+        catch (OperationCanceledException) { return false; }
+        // Дочерние процессы редактора (WebView2) отпускают файлы чуть позже основного.
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        return true;
     }
 
     private void Mode_Changed(object sender, RoutedEventArgs e)

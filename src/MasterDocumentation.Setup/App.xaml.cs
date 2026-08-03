@@ -12,5 +12,8 @@ public partial class App : Application
             args.Handled = true;
         };
         base.OnStartup(e);
+        // Обновление приложение запускает само и передаёт готовые параметры — окно выбора не нужно.
+        MainWindow = new SetupWindow(UpdateRequest.Parse(e.Args));
+        MainWindow.Show();
     }
 }
