@@ -13,12 +13,25 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-# В Windows PowerShell сборки со сжатием нужно загрузить явно, в PowerShell 7 они уже доступны
-# и Add-Type может завершиться ошибкой — поэтому загрузка не должна прерывать сборку.
+# В Windows PowerShell сборки со сжатием нужно загрузить явно, в PowerShell 7 Add-Type для них
+# завершается ошибкой, а сама сборка подгружается по имени средой выполнения. Пробуем оба
+# способа и прерываем сборку, только если тип так и не появился.
 foreach ($assembly in 'System.IO.Compression', 'System.IO.Compression.FileSystem') {
     try { Add-Type -AssemblyName $assembly -ErrorAction Stop } catch { }
 }
+if (-not ('System.IO.Compression.ZipFile' -as [type])) {
+    foreach ($assembly in 'System.IO.Compression.ZipFile', 'System.IO.Compression.FileSystem') {
+        try { [void][Reflection.Assembly]::Load($assembly) } catch { }
+    }
+}
 if (-not ('System.IO.Compression.ZipFile' -as [type])) { throw 'System.IO.Compression.ZipFile is not available in this PowerShell host.' }
+
+# Сертификат подписи в сборке приходит из секрета в виде base64.
+if (-not $CertificatePath -and -not $CertificateThumbprint -and $env:SIGNING_CERTIFICATE) {
+    $CertificatePath = Join-Path ([IO.Path]::GetTempPath()) 'masterdocumentation-signing.pfx'
+    [IO.File]::WriteAllBytes($CertificatePath, [Convert]::FromBase64String($env:SIGNING_CERTIFICATE))
+    if (-not $CertificatePassword) { $CertificatePassword = $env:SIGNING_PASSWORD }
+}
 
 $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root 'src\MasterDocumentation.App\MasterDocumentation.App.csproj'
