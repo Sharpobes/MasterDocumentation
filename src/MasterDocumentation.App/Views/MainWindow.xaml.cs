@@ -629,6 +629,23 @@ public partial class MainWindow : Window
         }
         _=ModernEditor.ExecuteAsync("selectImage",new{src=item.StoredName});
     }
+    /// <summary>
+    /// Пока идёт долгая операция, редактор скрывается: WebView2 рисуется собственным HWND поверх
+    /// элементов WPF, и карточка с ходом выполнения оказывалась под ним — пользователь видел
+    /// только затемнённое окно без единой строки о происходящем.
+    /// </summary>
+    private void ShowOperationOverlay(string title,string description)
+    {
+        OperationTitle.Text=title;OperationDescription.Text=description;
+        OperationOverlay.Visibility=Visibility.Visible;
+        AutomationProperties.SetName(OperationOverlay,title);
+        ModernEditor.SetBrowserVisible(false);
+    }
+    private void HideOperationOverlay()
+    {
+        OperationOverlay.Visibility=Visibility.Collapsed;
+        if(SettingsHost.Visibility!=Visibility.Visible)ModernEditor.SetBrowserVisible(true);
+    }
     private void ModernEditor_InitializationFailed(object? sender,string error)
     {
         LogService.Error("Не удалось запустить редактор WebView2: "+error);
@@ -963,11 +980,11 @@ public partial class MainWindow : Window
     {
         if(OperationOverlay.Visibility==Visibility.Visible)return;
         if(MessageBox.Show(this,$"Обновить MasterDocumentation до версии {release.Display}?\n\nПриложение закроется, установщик обновит папку {UpdateService.InstallDirectory} и запустит его снова.\n\nДокументация и настройки сохранятся.","Обновление",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
-        OperationTitle.Text="Загрузка обновления";OperationDescription.Text=$"Скачивается установщик версии {release.Display}. Не закрывайте приложение.";OperationOverlay.Visibility=Visibility.Visible;
-        AutomationProperties.SetName(OperationOverlay,OperationTitle.Text);
+        var size=release.InstallerSize>0?$" ({release.InstallerSize/1024d/1024d:0} МБ)":"";
+        ShowOperationOverlay("Загрузка обновления",$"Скачивается установщик версии {release.Display}{size}. Не закрывайте приложение.");
         try
         {
-            var progress=new Progress<double>(value=>OperationDescription.Text=$"Скачивается установщик версии {release.Display}: {value:0}%.");
+            var progress=new Progress<double>(value=>OperationDescription.Text=$"Скачивается установщик версии {release.Display}{size}: {value:0}%.");
             var installer=await UpdateService.DownloadAsync(release,progress);
             _vm.SaveAll();
             UpdateService.LaunchInstaller(installer);
@@ -976,7 +993,7 @@ public partial class MainWindow : Window
         catch(Exception ex)
         {
             LogService.Error("Не удалось обновить приложение",ex);
-            OperationOverlay.Visibility=Visibility.Collapsed;
+            HideOperationOverlay();
             MessageBox.Show(this,ex.Message,"Обновление",MessageBoxButton.OK,MessageBoxImage.Error);
         }
     }
@@ -1044,14 +1061,13 @@ public partial class MainWindow : Window
             string? password=null;
             if(BackupService.IsEncrypted(d.FileName)){var prompt=new PasswordDialog("Пароль зашифрованной резервной копии"){Owner=this};if(prompt.ShowDialog()!=true)return;password=prompt.Value;}
             _vm.SaveAll();
-            OperationTitle.Text="Восстановление из резервной копии";OperationDescription.Text="Данные заменяются содержимым выбранного архива. Не закрывайте приложение.";OperationOverlay.Visibility=Visibility.Visible;
-            AutomationProperties.SetName(OperationOverlay,OperationTitle.Text);
+            ShowOperationOverlay("Восстановление из резервной копии","Данные заменяются содержимым выбранного архива. Не закрывайте приложение.");
             await Task.Run(()=>_vm.Backups.Restore(d.FileName,password));
             MessageBox.Show("Данные восстановлены. Приложение будет закрыто; запустите его снова.");
             Close();
         }
         catch (Exception ex) { LogService.Error("Ошибка восстановления", ex); MessageBox.Show("Не удалось восстановить: " + ex.Message); }
-        finally { OperationOverlay.Visibility=Visibility.Collapsed; }
+        finally { HideOperationOverlay(); }
     }
     private async void Export_Click(object sender, RoutedEventArgs e)
     {
@@ -1064,8 +1080,7 @@ public partial class MainWindow : Window
     private async Task RunOperationAsync(string title,string description,Func<string> operation,string successTitle)
     {
         if(OperationOverlay.Visibility==Visibility.Visible)return;
-        OperationTitle.Text=title;OperationDescription.Text=description;OperationOverlay.Visibility=Visibility.Visible;
-        AutomationProperties.SetName(OperationOverlay,title);
+        ShowOperationOverlay(title,description);
         try
         {
             var result=await Task.Run(operation);
@@ -1076,7 +1091,7 @@ public partial class MainWindow : Window
             LogService.Error(title,ex);
             MessageBox.Show(this,ex.Message,title,MessageBoxButton.OK,MessageBoxImage.Error);
         }
-        finally{OperationOverlay.Visibility=Visibility.Collapsed;}
+        finally{HideOperationOverlay();}
     }
     private async void ExportDocument_Click(object sender, RoutedEventArgs e)
     {
