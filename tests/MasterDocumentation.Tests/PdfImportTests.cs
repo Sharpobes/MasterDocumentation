@@ -56,6 +56,38 @@ public sealed class PdfImportTests : IDisposable
         Assert.Contains("Строка номер 60", result.PlainText);
     }
 
+    /// <summary>
+    /// Изображение из PDF возвращается картинкой и стоит между строками там же, где было
+    /// на странице: документ после импорта должен выглядеть как исходный файл.
+    /// </summary>
+    [Fact]
+    public void Extract_ReturnsImagesInReadingOrder()
+    {
+        var picture = Path.Combine(_folder, "picture.png");
+        File.WriteAllBytes(picture, Png);
+        var path = Path.Combine(_folder, "with-image.pdf");
+        new DocumentExportService(_folder).Export(
+            $"<p>Строка до картинки</p><p><img src=\"{new Uri(picture).AbsoluteUri}\" alt=\"picture.png\"></p><p>Строка после картинки</p>",
+            "запас",
+            "Документ с картинкой",
+            path);
+
+        var result = PdfImportService.Extract(path);
+
+        Assert.True(result.HasImages);
+        var blocks = result.Pages[0];
+        var imageIndex = blocks.ToList().FindIndex(block => block.Kind == PdfBlockKind.Image);
+        var beforeIndex = blocks.ToList().FindIndex(block => block.Text.Contains("до картинки"));
+        var afterIndex = blocks.ToList().FindIndex(block => block.Text.Contains("после картинки"));
+        Assert.True(imageIndex > beforeIndex, "картинка должна идти после первой строки");
+        Assert.True(imageIndex < afterIndex, "картинка должна идти до последней строки");
+        Assert.NotNull(blocks[imageIndex].Image);
+        Assert.NotEmpty(blocks[imageIndex].Image!);
+    }
+
+    // Минимальный корректный PNG 1×1: содержимого достаточно для проверки переноса картинки.
+    private static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
+
     /// <summary>Пустой PDF без текстового слоя импортом содержимого не считается.</summary>
     [Fact]
     public void Extract_ReportsMissingTextLayer()
@@ -67,7 +99,7 @@ public sealed class PdfImportTests : IDisposable
 
         var result = PdfImportService.Extract(path);
 
-        Assert.False(result.HasText);
+        Assert.False(result.HasContent);
         Assert.Equal(1, result.PageCount);
     }
 }

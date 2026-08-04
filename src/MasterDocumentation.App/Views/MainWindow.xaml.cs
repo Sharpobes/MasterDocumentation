@@ -138,19 +138,30 @@ public partial class MainWindow : Window
             LogService.Error("Не удалось прочитать текст PDF",ex);
             return ($"<p>Не удалось прочитать текст PDF: {System.Net.WebUtility.HtmlEncode(ex.Message)}</p>{link}",$"Не удалось прочитать текст PDF. Исходный файл: {name}");
         }
-        if(!result.HasText)
-            return ($"<p>В этом PDF нет текстового слоя — обычно так выглядят сканы. Текст перенести не удалось, файл сохранён вложением.</p>{link}",
-                    $"В PDF нет текстового слоя. Исходный файл: {name}");
+        if(!result.HasContent)
+            return ($"<p>В этом PDF нет ни текстового слоя, ни изображений, которые удалось бы прочитать. Файл сохранён вложением.</p>{link}",
+                    $"В PDF нет читаемого содержимого. Исходный файл: {name}");
         var builder=new System.Text.StringBuilder();
+        var imageNumber=0;
         for(var index=0;index<result.Pages.Count;index++)
         {
             var page=result.Pages[index];
-            if(page.Length==0)continue;
+            if(page.Count==0)continue;
             if(result.Pages.Count>1)builder.Append("<p><strong>Страница ").Append(index+1).Append("</strong></p>");
-            foreach(var line in page.Split('\n'))
+            foreach(var block in page)
             {
-                if(line.Trim().Length==0)continue;
-                builder.Append("<p>").Append(System.Net.WebUtility.HtmlEncode(line)).Append("</p>");
+                if(block.Kind==PdfBlockKind.Text)
+                {
+                    if(block.Text.Trim().Length==0)continue;
+                    builder.Append("<p>").Append(System.Net.WebUtility.HtmlEncode(block.Text)).Append("</p>");
+                    continue;
+                }
+                if(block.Image is null)continue;
+                var fileName=$"{Path.GetFileNameWithoutExtension(name)}-{++imageNumber}{block.Extension}";
+                var mime=block.Extension==".jpg"?"image/jpeg":"image/png";
+                var stored=StoreAssetBytes(block.Image,fileName,mime);
+                _vm.Database.RegisterAttachment(documentId,fileName,stored.StoredName,mime,stored.Size,stored.Hash);
+                builder.Append("<p><img src=\"https://assets.local/").Append(stored.StoredName).Append("\" alt=\"").Append(System.Net.WebUtility.HtmlEncode(fileName)).Append("\"></p>");
             }
         }
         builder.Append(link);
