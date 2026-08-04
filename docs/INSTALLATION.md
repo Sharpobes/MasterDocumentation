@@ -4,17 +4,17 @@
 
 Откройте [страницу всех релизов](https://github.com/Sharpobes/MasterDocumentation/releases). GitHub хранит каждую опубликованную версию отдельно, поэтому можно скачать как последнюю, так и предыдущую сборку.
 
-Для версии 1.1.0 используйте:
+Для версии 1.2.0 используйте:
 
-- [установщик v1.1.0](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.1.0/MasterDocumentation-Setup-v1.1.0.exe) — графическая установка;
-- [portable ZIP v1.1.0](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.1.0/MasterDocumentation-v1.1.0-win-x64.zip) — распаковка вручную;
-- [SHA-256 установщика](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.1.0/MasterDocumentation-Setup-v1.1.0.exe.sha256) и [SHA-256 архива](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.1.0/MasterDocumentation-v1.1.0-win-x64.zip.sha256).
+- [установщик v1.2.0](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.2.0/MasterDocumentation-Setup-v1.2.0.exe) — графическая установка;
+- [portable ZIP v1.2.0](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.2.0/MasterDocumentation-v1.2.0-win-x64.zip) — распаковка вручную;
+- [SHA-256 установщика](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.2.0/MasterDocumentation-Setup-v1.2.0.exe.sha256) и [SHA-256 архива](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.2.0/MasterDocumentation-v1.2.0-win-x64.zip.sha256).
 
 Если репозиторий закрыт (private), ссылки на файлы релиза открываются только у участников с доступом. Чтобы их мог скачать любой пользователь, репозиторий нужно сделать публичным: **Settings → General → Danger Zone → Change repository visibility → Public**.
 
 ## Установка через установщик
 
-1. Скачайте `MasterDocumentation-Setup-v1.1.0.exe` из блока **Assets** на странице релиза.
+1. Скачайте `MasterDocumentation-Setup-v1.2.0.exe` из блока **Assets** на странице релиза.
 2. Запустите файл. Откроется окно установки с двумя режимами:
    - **Установить на компьютер** — ярлыки на рабочем столе и в меню «Пуск», запись в «Программы и компоненты», документация в профиле пользователя;
    - **Портативная версия** — приложение и папка `Data` в одной папке, реестр и система не изменяются.
@@ -51,8 +51,8 @@
 В PowerShell выполните:
 
 ```powershell
-Get-FileHash .\MasterDocumentation-Setup-v1.1.0.exe -Algorithm SHA256
-Get-Content .\MasterDocumentation-Setup-v1.1.0.exe.sha256
+Get-FileHash .\MasterDocumentation-Setup-v1.2.0.exe -Algorithm SHA256
+Get-Content .\MasterDocumentation-Setup-v1.2.0.exe.sha256
 ```
 
 Хеши должны совпасть. Файлы `.sha256` создаёт тот же workflow, который собирает релиз.
@@ -64,6 +64,18 @@ Get-Content .\MasterDocumentation-Setup-v1.1.0.exe.sha256
 Если нужна отдельная папка, выберите её в мастере или позднее в `Настройки → Хранение → Изменить папку`. Перенос выполняется через временную копию с последующей проверкой `PRAGMA integrity_check`.
 
 ## Обновление без потери данных
+
+### Из самого приложения
+
+Начиная с 1.2.0 обновление не требует ручного скачивания. Приложение проверяет новые выпуски при запуске (если в настройках включено «Проверять обновления») и по команде **☰ → Проверить обновления**. Когда версия новее текущей найдена, появится уведомление с кнопкой **Обновить**:
+
+1. приложение скачивает установщик и сверяет его SHA-256 с контрольной суммой выпуска;
+2. закрывается и передаёт установщику текущую папку и режим установки;
+3. установщик распаковывает новую версию поверх старой и запускает приложение обратно.
+
+Документация, настройки и ярлыки остаются на месте. Предварительные выпуски предлагаются только тем, кто уже работает на бете; стабильная копия видит лишь стабильные версии.
+
+### Вручную
 
 Установленная версия: запустите новый установщик и укажите ту же папку — файлы обновятся, `data-location.txt` и документация останутся на месте.
 

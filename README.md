@@ -2,15 +2,17 @@
 
 Полностью локальное portable-приложение для создания и ведения технической документации на Windows. Учётная запись, сервер, облачная синхронизация и интернет для работы не нужны.
 
-## Скачать MasterDocumentation 1.1.0
+## Скачать MasterDocumentation 1.2.0
 
-**[Установщик с интерфейсом — MasterDocumentation-Setup-v1.1.0.exe](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.1.0/MasterDocumentation-Setup-v1.1.0.exe)** — выбор папки, ярлыки, удаление через «Программы и компоненты». Права администратора не нужны.
+**[Установщик с интерфейсом — MasterDocumentation-Setup-v1.2.0.exe](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.2.0/MasterDocumentation-Setup-v1.2.0.exe)** — выбор папки, ярлыки, удаление через «Программы и компоненты». Права администратора не нужны.
 
-**[Портативная версия — MasterDocumentation-v1.1.0-win-x64.zip](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.1.0/MasterDocumentation-v1.1.0-win-x64.zip)** — распакуйте архив целиком и запустите `MasterDocumentation.exe`.
+**[Портативная версия — MasterDocumentation-v1.2.0-win-x64.zip](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.2.0/MasterDocumentation-v1.2.0-win-x64.zip)** — распакуйте архив целиком и запустите `MasterDocumentation.exe`.
 
 [Выбрать версию](docs/RELEASES.md) · [GitHub Releases](https://github.com/Sharpobes/MasterDocumentation/releases) · [Подробная установка](docs/INSTALLATION.md) · [История изменений](CHANGELOG.md)
 
-> Ссылки работают после публикации тега `v1.1.0`: каждый тег `v*` собирает установщик и портативный архив и создаёт GitHub Release с обоими файлами и их SHA-256. Если репозиторий закрыт, скачивание доступно только участникам с доступом — сделайте репозиторий публичным, чтобы ссылки открывались у всех.
+Установленная копия обновляется сама: приложение проверяет новые выпуски при запуске и по команде **☰ → Проверить обновления**, скачивает установщик, сверяет SHA-256 и запускает его в режиме обновления. Документация и настройки сохраняются.
+
+> Каждый тег `v*` собирает установщик и портативный архив и создаёт GitHub Release с обоими файлами и их SHA-256. Тег с суффиксом (`v1.3.0-beta`) публикуется как предварительный выпуск. Если репозиторий закрыт, скачивание доступно только участникам с доступом — сделайте репозиторий публичным, чтобы ссылки открывались у всех.
 
 ## Основные возможности
 
@@ -31,13 +33,18 @@
 - локальные версии документа, сравнение, закрепление и восстановление;
 - ручные и автоматические `.mdbackup`, контрольные суммы и AES-256-GCM;
 - тёмная, светлая и системная темы;
-- перенос папки данных с проверкой целостности SQLite.
+- перенос папки данных с проверкой целостности SQLite;
+- хранение в SQLite или PostgreSQL с переносом документов между базами;
+- обновление из самого приложения: проверка выпусков, скачивание установщика с проверкой SHA-256 и запуск его в режиме обновления;
+- центр уведомлений: значок в строке состояния хранит все уведомления и их действия;
+- PDF с оглавлением и закладками по заголовкам для навигации в любой программе просмотра;
+- корзина со сроком хранения 30 дней и автоматической очисткой.
 
 ## Быстрая установка
 
 ### Установщик
 
-1. Скачайте `MasterDocumentation-Setup-v1.1.0.exe` из блока **Assets** на странице релиза.
+1. Скачайте `MasterDocumentation-Setup-v1.2.0.exe` из блока **Assets** на странице релиза.
 2. Запустите файл — откроется окно установки.
 3. Выберите режим: **Установить на компьютер** или **Портативная версия**, укажите папку и нужные ярлыки.
 4. Нажмите «Установить». Приложение запустится само, если оставить соответствующую галочку.
@@ -46,7 +53,7 @@
 
 ### Портативная версия
 
-1. Скачайте `MasterDocumentation-v1.1.0-win-x64.zip`.
+1. Скачайте `MasterDocumentation-v1.2.0-win-x64.zip`.
 2. Распакуйте архив полностью в обычную локальную папку, например `D:\Apps\MasterDocumentation`.
 3. Запустите `MasterDocumentation.exe` и пройдите короткий мастер первого запуска.
 
@@ -106,16 +113,16 @@ dotnet test MasterDocumentation.sln -c Release --no-build
 Готовый релиз (портативный ZIP и установщик):
 
 ```powershell
-.\scripts\build-release.ps1 -Version 1.1.0
+.\scripts\build-release.ps1 -Version 1.2.0
 ```
 
-Результат появится в `artifacts/`: `MasterDocumentation-v1.1.0-win-x64.zip`, `MasterDocumentation-Setup-v1.1.0.exe` и файлы `.sha256`. Установщик — это `MasterDocumentation.Setup` (WPF), к которому в конец EXE дописан портативный архив: `[ZIP][длина Int64][сигнатура MDSETUP1]`. Ключ `-SkipInstaller` собирает только архив, `-SkipTests` пропускает тесты. GitHub Actions выполняет те же шаги при отправке тега `v*`.
+Результат появится в `artifacts/`: `MasterDocumentation-v1.2.0-win-x64.zip`, `MasterDocumentation-Setup-v1.2.0.exe` и файлы `.sha256`. Установщик — это `MasterDocumentation.Setup` (WPF), к которому в конец EXE дописан портативный архив: `[ZIP][длина Int64][сигнатура MDSETUP1]`. Ключ `-SkipInstaller` собирает только архив, `-SkipTests` пропускает тесты. GitHub Actions выполняет те же шаги при отправке тега `v*`.
 
 ## Выпуск новой версии
 
 ```powershell
-git tag -a v1.1.0 -m "MasterDocumentation v1.1.0"
-git push origin v1.1.0
+git tag -a v1.2.0 -m "MasterDocumentation v1.2.0"
+git push origin v1.2.0
 ```
 
 Workflow соберёт редактор, выполнит тесты, создаст self-contained portable-папку, упакует её в ZIP, соберёт установщик, рассчитает SHA-256 и прикрепит все четыре файла к GitHub Release. Перед выпуском следующей версии обновите `CHANGELOG.md` и таблицу в `docs/RELEASES.md`.
