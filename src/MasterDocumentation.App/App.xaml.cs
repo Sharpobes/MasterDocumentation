@@ -21,6 +21,10 @@ public partial class App : Application
             LogService.Error("Необработанная ошибка", args.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, args) => { LogService.Error("Необработанная ошибка фоновой задачи", args.Exception); args.SetObserved(); };
         base.OnStartup(e);
+        // До появления главного окна режим OnMainWindowClose опасен: WPF назначает главным
+        // первое созданное окно, поэтому закрытие мастера первого запуска завершало приложение
+        // раньше, чем оно успевало открыться. Обычный режим возвращается после показа окна.
+        ShutdownMode=ShutdownMode.OnExplicitShutdown;
         if(Uninstaller.IsRequested(e.Args)){Uninstaller.Run(e.Args);Shutdown();return;}
         if(!EnsureWritableStorage()){Shutdown();return;}
         string? firstDocumentTitle=null;
@@ -42,7 +46,7 @@ public partial class App : Application
         {
             var title=firstDocumentTitle.Trim();var candidate=title;for(var index=2;viewModel.Database.TitleExists(null,candidate);index++)candidate=$"{title} ({index})";var id=viewModel.Database.Create(null,false,candidate);var current=_services.GetRequiredService<SettingsService>().Load();current.OpenDocumentIds=[id];current.SelectedDocumentId=id;_services.GetRequiredService<SettingsService>().Save(current);viewModel.ReloadTree();
         }
-        MainWindow = _services.GetRequiredService<MainWindow>(); MainWindow.Show();
+        MainWindow = _services.GetRequiredService<MainWindow>(); MainWindow.Show(); ShutdownMode=ShutdownMode.OnMainWindowClose;
     }
 
     protected override void OnExit(ExitEventArgs e) { _services?.Dispose(); base.OnExit(e); }

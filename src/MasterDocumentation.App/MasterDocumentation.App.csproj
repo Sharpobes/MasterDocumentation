@@ -10,8 +10,13 @@
     <Version>1.2.0-beta</Version>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
-    <!-- The fixed WebView2 runtime must remain as physical files next to the app. -->
-    <PublishSingleFile>false</PublishSingleFile>
+    <!-- Все библиотеки упакованы в сам EXE: иначе рядом с ним лежат сотни файлов и найти
+         MasterDocumentation.exe в папке трудно. Фиксированный WebView2 Runtime и файлы
+         редактора остаются отдельными папками — они подключаются как обычные файлы. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <SatelliteResourceLanguages>ru</SatelliteResourceLanguages>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>

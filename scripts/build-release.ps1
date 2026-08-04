@@ -106,7 +106,10 @@ if (Test-Path -LiteralPath $publish) { Remove-Item -LiteralPath $publish -Recurs
 New-Item -ItemType Directory -Force -Path $publish | Out-Null
 dotnet publish $project -c Release -r win-x64 --self-contained true --no-build -p:Version=$Version -o $publish
 
+# В корне остаётся только MasterDocumentation.exe рядом с папками Editor и WebView2:
+# отладочные символы и XML-документация пакетов пользователю не нужны.
 Get-ChildItem -LiteralPath $publish -Filter '*.pdb' -File | Remove-Item -Force
+Get-ChildItem -LiteralPath $publish -Filter '*.xml' -File | Remove-Item -Force
 Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $publish
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $publish
 Copy-Item -LiteralPath (Join-Path $root 'docs\INSTALLATION.md') -Destination (Join-Path $publish 'INSTALLATION.md')

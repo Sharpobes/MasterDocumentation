@@ -708,7 +708,7 @@
                 </Grid>
               </ScrollViewer>
             </Grid>
-            <editor:TiptapEditor x:Name="ModernEditor" Visibility="Collapsed" ContentChanged="ModernEditor_ContentChanged" SelectionChanged="ModernEditor_SelectionChanged" FileDropped="ModernEditor_FileDropped" AssetOpenRequested="ModernEditor_AssetOpenRequested" ImageMissing="ModernEditor_ImageMissing" LinkOpenRequested="ModernEditor_LinkOpenRequested" EditorReady="ModernEditor_Ready" />
+            <editor:TiptapEditor x:Name="ModernEditor" Visibility="Collapsed" ContentChanged="ModernEditor_ContentChanged" SelectionChanged="ModernEditor_SelectionChanged" FileDropped="ModernEditor_FileDropped" AssetOpenRequested="ModernEditor_AssetOpenRequested" ImageMissing="ModernEditor_ImageMissing" InitializationFailed="ModernEditor_InitializationFailed" LinkOpenRequested="ModernEditor_LinkOpenRequested" EditorReady="ModernEditor_Ready" />
             <RichTextBox x:Name="Editor" Visibility="Collapsed" AcceptsTab="True" Padding="38,22" BorderThickness="0" Background="{DynamicResource Background/Editor}" Foreground="{DynamicResource Text/Primary}" FontSize="15" CaretBrush="{DynamicResource Text/Primary}" VerticalScrollBarVisibility="Auto" TextChanged="Editor_TextChanged" SelectionChanged="Editor_SelectionChanged" PreviewKeyDown="Editor_PreviewKeyDown" PreviewMouseLeftButtonDown="Editor_PreviewMouseLeftButtonDown" SpellCheck.IsEnabled="True" />
           </Grid>
         </Grid>

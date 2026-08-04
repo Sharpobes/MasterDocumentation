@@ -629,6 +629,11 @@ public partial class MainWindow : Window
         }
         _=ModernEditor.ExecuteAsync("selectImage",new{src=item.StoredName});
     }
+    private void ModernEditor_InitializationFailed(object? sender,string error)
+    {
+        LogService.Error("Не удалось запустить редактор WebView2: "+error);
+        ToastService.Show("Редактор не запустился","Подробности записаны в Data\\Logs. Нажмите «Повторить запуск редактора» на месте редактора или перезапустите приложение.",ToastKind.Error,TimeSpan.FromSeconds(12));
+    }
     private void ModernEditor_ImageMissing(object? sender,string source)=>
         ToastService.Show("Вложения не видно в тексте","Файл прикреплён к документу, но не вставлен в содержимое.",ToastKind.Information);
     private void OpenAttachment_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;_vm.Database.MaterializeAsset(item.StoredName);var path=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(path)){MessageBox.Show(this,"Файл вложения не найден в локальном хранилище.","Вложения",MessageBoxButton.OK,MessageBoxImage.Warning);return;}Process.Start(new ProcessStartInfo(path){UseShellExecute=true});}

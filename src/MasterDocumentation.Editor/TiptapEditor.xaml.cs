@@ -11,7 +11,8 @@ public sealed record EditorContent(long DocumentId,string Json,string Html,strin
 public sealed record EditorFileData(long DocumentId,string Name,string MimeType,string DataUrl);
 public partial class TiptapEditor : UserControl
 {
-    private readonly TaskCompletionSource _ready=new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource _ready=new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private bool _failed;
     private readonly Dictionary<string,TaskCompletionSource<EditorContent>> _snapshots=[];
     private Task? _initializationTask;
     private long _contentRequestVersion;
@@ -25,15 +26,67 @@ public partial class TiptapEditor : UserControl
     public event EventHandler<string>? ImageMissing;
     public event EventHandler<string>? LinkOpenRequested;
     public event EventHandler? EditorReady;
-    public TiptapEditor(){InitializeComponent();Loaded+=async(_,_)=>await InitializeAsync();}
+    /// <summary>Редактор не удалось запустить — сообщение уже показано на его месте.</summary>
+    public event EventHandler<string>? InitializationFailed;
+    /// <summary>Пользователь попросил повторить запуск редактора.</summary>
+    public event EventHandler? RetryRequested;
+    public TiptapEditor(){InitializeComponent();Loaded+=async(_,_)=>{try{await InitializeAsync();}catch(Exception ex){ShowFailure(ex);}};}
     public Task InitializeAsync()
     {
         if(Browser.CoreWebView2 is not null)return Task.CompletedTask;
         return _initializationTask??=InitializeCoreAsync();
     }
+    /// <summary>
+    /// Запуск WebView2 может не удаться: папку профиля держит не завершившийся прошлый запуск,
+    /// нет прав на её создание, повреждён встроенный runtime. Раньше это выпадало необработанным
+    /// исключением и общим окном ошибки приложения, а панель инструментов продолжала ждать
+    /// редактор, который так и не появился. Теперь ошибка показывается на месте редактора,
+    /// а профиль пересоздаётся во временной папке — этого хватает при занятом профиле.
+    /// </summary>
     private async Task InitializeCoreAsync()
     {
-        var runtimeRoot=new[]{Path.Combine(AppContext.BaseDirectory,"FixedRuntime"),Path.Combine(AppContext.BaseDirectory,"WebView2")}.FirstOrDefault(Directory.Exists);string? browserFolder=null;if(runtimeRoot is not null){var exe=Directory.EnumerateFiles(runtimeRoot,"msedgewebview2.exe",SearchOption.AllDirectories).FirstOrDefault();browserFolder=exe is null?null:Path.GetDirectoryName(exe);if(browserFolder is not null)TryGrantRuntimePermissions(browserFolder);}var userData=Path.Combine(DataFolder,"Temp","WebView2");Directory.CreateDirectory(userData);var environment=await CoreWebView2Environment.CreateAsync(browserFolder,userData);await Browser.EnsureCoreWebView2Async(environment);var core=Browser.CoreWebView2!;try{await core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache);}catch{ }core.Settings.AreDevToolsEnabled=false;core.Settings.AreDefaultContextMenusEnabled=false;core.Settings.IsStatusBarEnabled=false;core.Settings.IsPasswordAutosaveEnabled=false;core.Settings.IsGeneralAutofillEnabled=false;core.SetVirtualHostNameToFolderMapping("editor.local",Path.Combine(AppContext.BaseDirectory,"Editor"),CoreWebView2HostResourceAccessKind.DenyCors);var assets=Path.Combine(DataFolder,"Assets");Directory.CreateDirectory(assets);core.SetVirtualHostNameToFolderMapping("assets.local",assets,CoreWebView2HostResourceAccessKind.DenyCors);core.NavigationStarting+=(_,e)=>{if(!e.Uri.StartsWith("https://editor.local/",StringComparison.OrdinalIgnoreCase))e.Cancel=true;};core.NewWindowRequested+=(_,e)=>e.Handled=true;core.WebMessageReceived+=OnMessage;core.Navigate("https://editor.local/index.html");
+        try
+        {
+            await StartBrowserAsync(null);
+        }
+        catch (Exception first)
+        {
+            try
+            {
+                await StartBrowserAsync("WebView2-" + Environment.ProcessId);
+            }
+            catch (Exception second)
+            {
+                // Ожидание готовности не завершается ошибкой: команды панели инструментов просто
+                // ничего не делают, пока редактор не запущен повторно.
+                _initializationTask=null;
+                _failed=true;
+                ShowFailure(second);
+                InitializationFailed?.Invoke(this,first.Message);
+            }
+        }
+    }
+
+    private void ShowFailure(Exception error)
+    {
+        FailureText.Text=error.Message;
+        FailurePanel.Visibility=Visibility.Visible;
+        Browser.Visibility=Visibility.Collapsed;
+    }
+
+    private async void Retry_Click(object sender,RoutedEventArgs e)
+    {
+        FailurePanel.Visibility=Visibility.Collapsed;
+        Browser.Visibility=Visibility.Visible;
+        _failed=false;
+        _ready=new(TaskCreationOptions.RunContinuationsAsynchronously);
+        RetryRequested?.Invoke(this,EventArgs.Empty);
+        try{await InitializeAsync();}catch(Exception ex){_failed=true;ShowFailure(ex);}
+    }
+
+    private async Task StartBrowserAsync(string? profileName)
+    {
+        var runtimeRoot=new[]{Path.Combine(AppContext.BaseDirectory,"FixedRuntime"),Path.Combine(AppContext.BaseDirectory,"WebView2")}.FirstOrDefault(Directory.Exists);string? browserFolder=null;if(runtimeRoot is not null){var exe=Directory.EnumerateFiles(runtimeRoot,"msedgewebview2.exe",SearchOption.AllDirectories).FirstOrDefault();browserFolder=exe is null?null:Path.GetDirectoryName(exe);if(browserFolder is not null)TryGrantRuntimePermissions(browserFolder);}var userData=Path.Combine(DataFolder,"Temp",profileName??"WebView2");Directory.CreateDirectory(userData);var environment=await CoreWebView2Environment.CreateAsync(browserFolder,userData);await Browser.EnsureCoreWebView2Async(environment);var core=Browser.CoreWebView2!;try{await core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache);}catch{ }core.Settings.AreDevToolsEnabled=false;core.Settings.AreDefaultContextMenusEnabled=false;core.Settings.IsStatusBarEnabled=false;core.Settings.IsPasswordAutosaveEnabled=false;core.Settings.IsGeneralAutofillEnabled=false;core.SetVirtualHostNameToFolderMapping("editor.local",Path.Combine(AppContext.BaseDirectory,"Editor"),CoreWebView2HostResourceAccessKind.DenyCors);var assets=Path.Combine(DataFolder,"Assets");Directory.CreateDirectory(assets);core.SetVirtualHostNameToFolderMapping("assets.local",assets,CoreWebView2HostResourceAccessKind.DenyCors);core.NavigationStarting+=(_,e)=>{if(!e.Uri.StartsWith("https://editor.local/",StringComparison.OrdinalIgnoreCase))e.Cancel=true;};core.NewWindowRequested+=(_,e)=>e.Handled=true;core.WebMessageReceived+=OnMessage;core.Navigate("https://editor.local/index.html");
     }
     private static void TryGrantRuntimePermissions(string folder)
     {
@@ -65,7 +118,7 @@ public partial class TiptapEditor : UserControl
     }
     public async Task SetContentAsync(long documentId,string? json,string? html=null,bool focusEditor=false,string focusPosition="end")
     {
-        var version=Interlocked.Increment(ref _contentRequestVersion);await InitializeAsync();await _ready.Task;if(version!=Volatile.Read(ref _contentRequestVersion))return;
+        var version=Interlocked.Increment(ref _contentRequestVersion);await InitializeAsync();if(_failed)return;await _ready.Task;if(version!=Volatile.Read(ref _contentRequestVersion))return;
         object content;if(!string.IsNullOrWhiteSpace(json)){try{content=JsonSerializer.Deserialize<JsonElement>(json);}catch{content=html??"<p></p>";}}else content=html??"<p></p>";
         if(focusEditor)Browser.Focus();
         Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="setContent",documentId,json=content,focus=focusEditor,focusPosition=focusPosition=="start"?"start":"end"}));
@@ -75,8 +128,8 @@ public partial class TiptapEditor : UserControl
         await InitializeAsync();await _ready.Task.WaitAsync(cancellationToken);var requestId=Guid.NewGuid().ToString("N");var completion=new TaskCompletionSource<EditorContent>(TaskCreationOptions.RunContinuationsAsynchronously);_snapshots[requestId]=completion;Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="getContent",requestId}));
         try{return await completion.Task.WaitAsync(cancellationToken);}finally{_snapshots.Remove(requestId);}
     }
-    public async Task ExecuteAsync(string name,object? args=null){await InitializeAsync();await _ready.Task;Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="command",name,args=args??new{}}));}
-    public async Task PrintAsync(){await InitializeAsync();await _ready.Task;Browser.CoreWebView2.ShowPrintUI(CoreWebView2PrintDialogKind.System);}
+    public async Task ExecuteAsync(string name,object? args=null){await InitializeAsync();if(_failed)return;await _ready.Task;Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="command",name,args=args??new{}}));}
+    public async Task PrintAsync(){await InitializeAsync();if(_failed)return;await _ready.Task;Browser.CoreWebView2.ShowPrintUI(CoreWebView2PrintDialogKind.System);}
     public void SetBrowserVisible(bool visible)
     {
         if(!visible)
