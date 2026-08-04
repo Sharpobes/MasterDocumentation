@@ -944,7 +944,7 @@ public partial class MainWindow : Window
         }
         _updateOffered=true;
         ToastService.Show(
-            $"Доступна версия {release.Version}{(release.IsPreRelease?" (бета)":"")}",
+            $"Доступна версия {release.Display}{(release.IsPreRelease?" (бета)":"")}",
             $"Текущая версия {AppVersion.Display}. Обновление скачается и установится само, документы останутся на месте.",
             ToastKind.Information,
             TimeSpan.FromSeconds(12),
@@ -957,12 +957,12 @@ public partial class MainWindow : Window
     private async Task InstallUpdateAsync(UpdateRelease release)
     {
         if(OperationOverlay.Visibility==Visibility.Visible)return;
-        if(MessageBox.Show(this,$"Обновить MasterDocumentation до версии {release.Version}?\n\nПриложение закроется, установщик обновит папку {UpdateService.InstallDirectory} и запустит его снова.\n\nДокументация и настройки сохранятся.","Обновление",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
-        OperationTitle.Text="Загрузка обновления";OperationDescription.Text=$"Скачивается установщик версии {release.Version}. Не закрывайте приложение.";OperationOverlay.Visibility=Visibility.Visible;
+        if(MessageBox.Show(this,$"Обновить MasterDocumentation до версии {release.Display}?\n\nПриложение закроется, установщик обновит папку {UpdateService.InstallDirectory} и запустит его снова.\n\nДокументация и настройки сохранятся.","Обновление",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
+        OperationTitle.Text="Загрузка обновления";OperationDescription.Text=$"Скачивается установщик версии {release.Display}. Не закрывайте приложение.";OperationOverlay.Visibility=Visibility.Visible;
         AutomationProperties.SetName(OperationOverlay,OperationTitle.Text);
         try
         {
-            var progress=new Progress<double>(value=>OperationDescription.Text=$"Скачивается установщик версии {release.Version}: {value:0}%.");
+            var progress=new Progress<double>(value=>OperationDescription.Text=$"Скачивается установщик версии {release.Display}: {value:0}%.");
             var installer=await UpdateService.DownloadAsync(release,progress);
             _vm.SaveAll();
             UpdateService.LaunchInstaller(installer);

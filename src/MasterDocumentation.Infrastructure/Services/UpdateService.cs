@@ -27,7 +27,12 @@ public sealed record UpdateRelease(
     string? ChecksumUrl,
     string Notes,
     bool IsPreRelease,
-    string PageUrl);
+    string PageUrl,
+    string? Suffix = null)
+{
+    /// <summary>Версия так, как её видит пользователь: с суффиксом предрелиза, если он есть.</summary>
+    public string Display => string.IsNullOrEmpty(Suffix) ? Version.ToString() : $"{Version}-{Suffix}";
+}
 
 /// <summary>
 /// Обновление через тот же установщик, которым приложение и ставится: приложение скачивает
@@ -49,6 +54,41 @@ public static class UpdateService
             return version is null ? new Version(1, 0, 0) : new Version(version.Major, version.Minor, version.Build);
         }
     }
+
+    /// <summary>
+    /// Суффикс предрелиза текущей сборки («beta» у 1.2.0-beta) — в версии сборки его нет,
+    /// он остаётся только в информационной версии.
+    /// </summary>
+    public static string? CurrentSuffix
+    {
+        get
+        {
+            var assembly = Assembly.GetEntryAssembly() ?? typeof(UpdateService).Assembly;
+            var informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "";
+            var metadata = informational.IndexOf('+');
+            if (metadata >= 0) informational = informational[..metadata];
+            var dash = informational.IndexOf('-');
+            return dash >= 0 ? informational[(dash + 1)..] : null;
+        }
+    }
+
+    /// <summary>
+    /// Сравнение по правилам семантического версионирования: при равных числах сборка с
+    /// суффиксом старше сборки без него, поэтому 1.2.0-beta обновляется до 1.2.0.
+    /// </summary>
+    public static int Compare(Version left, string? leftSuffix, Version right, string? rightSuffix)
+    {
+        var numbers = left.CompareTo(right);
+        if (numbers != 0) return numbers;
+        if (string.IsNullOrEmpty(leftSuffix) && string.IsNullOrEmpty(rightSuffix)) return 0;
+        if (string.IsNullOrEmpty(leftSuffix)) return 1;
+        if (string.IsNullOrEmpty(rightSuffix)) return -1;
+        return string.Compare(leftSuffix, rightSuffix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Выпуск новее установленной сборки.</summary>
+    public static bool IsNewerThanCurrent(UpdateRelease release) =>
+        Compare(release.Version, release.Suffix, CurrentVersion, CurrentSuffix) > 0;
 
     public static string InstallDirectory => AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
 
@@ -85,7 +125,7 @@ public static class UpdateService
             using var client = CreateClient();
             var json = await client.GetStringAsync($"https://api.github.com/repos/{Repository}/releases?per_page=20", cancellationToken).ConfigureAwait(false);
             var release = SelectRelease(json, includePreRelease);
-            return release is not null && release.Version > CurrentVersion ? release : null;
+            return release is not null && IsNewerThanCurrent(release) ? release : null;
         }
         catch (Exception ex)
         {
@@ -104,7 +144,7 @@ public static class UpdateService
         {
             var release = ParseRelease(element);
             if (release is null || (release.IsPreRelease && !includePreRelease)) continue;
-            if (best is null || release.Version > best.Version) best = release;
+            if (best is null || Compare(release.Version, release.Suffix, best.Version, best.Suffix) > 0) best = release;
         }
         return best;
     }
@@ -147,10 +187,21 @@ public static class UpdateService
         var notes = root.TryGetProperty("body", out var body) ? body.GetString() ?? "" : "";
         var preRelease = root.TryGetProperty("prerelease", out var flag) && flag.ValueKind == JsonValueKind.True;
         var page = root.TryGetProperty("html_url", out var pageValue) ? pageValue.GetString() ?? ReleasesPageUrl : ReleasesPageUrl;
-        return new(version, tag, installerName, installerUrl, size, checksumUrl, notes, preRelease, page);
+        return new(version, tag, installerName, installerUrl, size, checksumUrl, notes, preRelease, page, ParseSuffix(tag));
     }
 
     /// <summary>Версия из тега вида v1.2.0 или 1.2.0-beta; суффикс предрелиза отбрасывается.</summary>
+    /// <summary>Суффикс предрелиза из тега: «beta» у v1.2.0-beta, null у стабильного выпуска.</summary>
+    public static string? ParseSuffix(string? tag)
+    {
+        if (string.IsNullOrWhiteSpace(tag)) return null;
+        var value = tag.Trim().TrimStart('v', 'V');
+        var metadata = value.IndexOf('+');
+        if (metadata >= 0) value = value[..metadata];
+        var dash = value.IndexOf('-');
+        return dash >= 0 && dash + 1 < value.Length ? value[(dash + 1)..] : null;
+    }
+
     public static Version? ParseVersion(string? tag)
     {
         if (string.IsNullOrWhiteSpace(tag)) return null;

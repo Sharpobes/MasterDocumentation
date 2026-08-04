@@ -92,6 +92,41 @@ public sealed class UpdateServiceTests
         Assert.Equal(Version.Parse(expected), release!.Version);
     }
 
+    /// <summary>
+    /// По семантическому версионированию 1.2.0-beta старше 1.2.0, поэтому бета должна
+    /// обновляться до одноимённого стабильного выпуска, а не считать версии равными.
+    /// </summary>
+    [Fact]
+    public void Compare_TreatsPreReleaseAsOlderThanSameNumbers()
+    {
+        var numbers = new Version(1, 2, 0);
+
+        Assert.True(UpdateService.Compare(numbers, null, numbers, "beta") > 0);
+        Assert.True(UpdateService.Compare(numbers, "beta", numbers, null) < 0);
+        Assert.Equal(0, UpdateService.Compare(numbers, "beta", numbers, "beta"));
+        Assert.True(UpdateService.Compare(new Version(1, 2, 1), "beta", numbers, null) > 0);
+    }
+
+    [Theory]
+    [InlineData("v1.2.0", null)]
+    [InlineData("v1.2.0-beta", "beta")]
+    [InlineData("1.3.0-rc.2", "rc.2")]
+    [InlineData("v1.2.0+build7", null)]
+    public void ParseSuffix_ReadsPreReleasePart(string tag, string? expected) =>
+        Assert.Equal(expected, UpdateService.ParseSuffix(tag));
+
+    /// <summary>Из беты и одноимённого выпуска новее считается стабильный.</summary>
+    [Fact]
+    public void SelectRelease_PrefersStableOverSamePreRelease()
+    {
+        var list = $"[ {Release("v1.2.0-beta", true)}, {Release("v1.2.0", false)} ]";
+
+        var release = UpdateService.SelectRelease(list, includePreRelease: true);
+
+        Assert.Equal("v1.2.0", release!.Tag);
+        Assert.Equal("1.2.0", release.Display);
+    }
+
     [Fact]
     public void SelectRelease_ReturnsNothingWhenOnlyPreReleasesAvailable() =>
         Assert.Null(UpdateService.SelectRelease($"[ {Release("v1.4.0", true)} ]", includePreRelease: false));
