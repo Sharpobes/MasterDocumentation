@@ -14,7 +14,6 @@
          MasterDocumentation.exe в папке трудно. Фиксированный WebView2 Runtime и файлы
          редактора остаются отдельными папками — они подключаются как обычные файлы. -->
     <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <SatelliteResourceLanguages>ru</SatelliteResourceLanguages>
     <ApplicationManifest>app.manifest</ApplicationManifest>
