@@ -412,11 +412,8 @@
                 <ui:AppIcon Kind="OpenFolder" Width="15" Height="15" Foreground="{DynamicResource Text/Secondary}" HorizontalAlignment="Center" />
               </Button>
             </UniformGrid>
-            <!-- Поля и кегль подобраны так, чтобы подпись «Приложения» помещалась в узкой панели. -->
-            <UniformGrid Columns="2" Margin="4,3,4,5">
-              <Button Style="{StaticResource NavButton}" Content="▣  Шаблоны" Click="Templates_Click" ToolTip="Открыть шаблоны документов" FontSize="10" Padding="2" Margin="1" />
-              <Button Style="{StaticResource NavButton}" Content="▦  Приложения" Click="Applications_Click" ToolTip="Открыть локальные инструменты" FontSize="10" Padding="2" Margin="1" />
-            </UniformGrid>
+            <!-- Отдельной кнопки «Приложения» нет: инструменты вынесены значками строкой выше. -->
+            <Button Style="{StaticResource NavButton}" Content="▣  Шаблоны" Click="Templates_Click" ToolTip="Открыть шаблоны документов" FontSize="11" Padding="3" Margin="5,3,5,5" />
           </StackPanel>
           <Grid Grid.Row="4" Background="{DynamicResource Background/SurfaceElevated}">
             <Grid.RowDefinitions>

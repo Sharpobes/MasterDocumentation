@@ -106,11 +106,11 @@ public partial class MainWindow : Window
     }
     private void ImportDocument_Click(object sender,RoutedEventArgs e)
     {
-        CreateMenuPopup.IsOpen=false;var dialog=new OpenFileDialog{Title="Импорт документа",Filter="Поддерживаемые документы|*.docx;*.html;*.htm;*.md;*.markdown;*.txt;*.rtf;*.pdf|Word (*.docx)|*.docx|HTML (*.html;*.htm)|*.html;*.htm|Markdown (*.md;*.markdown)|*.md;*.markdown|Текст (*.txt)|*.txt|RTF (*.rtf)|*.rtf|PDF как вложение (*.pdf)|*.pdf"};if(dialog.ShowDialog(this)!=true)return;
+        CreateMenuPopup.IsOpen=false;var dialog=new OpenFileDialog{Title="Импорт документа",Filter="Поддерживаемые документы|*.docx;*.html;*.htm;*.md;*.markdown;*.txt;*.rtf;*.pdf|Word (*.docx)|*.docx|HTML (*.html;*.htm)|*.html;*.htm|Markdown (*.md;*.markdown)|*.md;*.markdown|Текст (*.txt)|*.txt|RTF (*.rtf)|*.rtf|PDF (*.pdf)|*.pdf"};if(dialog.ShowDialog(this)!=true)return;
         try
         {
             var parent=TargetFolder();var title=UniqueTitle(parent,Path.GetFileNameWithoutExtension(dialog.FileName));var id=_vm.Database.Create(parent,false,title);var extension=Path.GetExtension(dialog.FileName).ToLowerInvariant();string html;string plain;
-            if(extension==".pdf") {var asset=StoreAsset(dialog.FileName);_vm.Database.RegisterAttachment(id,Path.GetFileName(dialog.FileName),asset.StoredName,"application/pdf",asset.Size,asset.Hash);plain=$"Вложение PDF: {Path.GetFileName(dialog.FileName)}";html=$"<p>Вложение PDF: <a href=\"https://assets.local/{asset.StoredName}\">{System.Net.WebUtility.HtmlEncode(Path.GetFileName(dialog.FileName))}</a></p>";}
+            if(extension==".pdf") (html,plain)=ImportPdf(dialog.FileName,id);
             else if(extension==".docx") (html,plain)=ImportDocx(dialog.FileName);
             else if(extension is ".md" or ".markdown") {plain=File.ReadAllText(dialog.FileName);html=ImportInlineImages(MarkdownService.ToHtml(plain),id,Path.GetDirectoryName(Path.GetFullPath(dialog.FileName))!);}
             else if(extension is ".html" or ".htm") {html=ImportInlineImages(SanitizeImportedHtml(File.ReadAllText(dialog.FileName)),id,Path.GetDirectoryName(Path.GetFullPath(dialog.FileName))!);plain=HtmlToPlainText(html);}
@@ -119,6 +119,42 @@ public partial class MainWindow : Window
             _vm.Database.SaveStructuredContent(id,"",html,plain);_vm.ReloadTree();UpdateNavigationCounts();var node=FindNode(_vm.Nodes,id);if(node is not null){_vm.Open(node);ShowSelectedTab();}ToastService.Show("Импорт завершён","Документ добавлен в локальное хранилище.",ToastKind.Success);
         }
         catch(Exception ex){LogService.Error("Ошибка импорта документа",ex);MessageBox.Show(this,"Не удалось импортировать документ: "+ex.Message,"Импорт",MessageBoxButton.OK,MessageBoxImage.Error);}
+    }
+    /// <summary>
+    /// PDF импортируется содержимым: текст переносится в документ, а сам файл остаётся вложением,
+    /// чтобы сохранить исходное оформление. У сканов текстового слоя нет — тогда документ
+    /// состоит из ссылки на вложение и объяснения, почему текста не будет.
+    /// </summary>
+    private (string Html,string Plain) ImportPdf(string path,long documentId)
+    {
+        var asset=StoreAsset(path);
+        var name=Path.GetFileName(path);
+        _vm.Database.RegisterAttachment(documentId,name,asset.StoredName,"application/pdf",asset.Size,asset.Hash);
+        var link=$"<p>Исходный файл: <a href=\"https://assets.local/{asset.StoredName}\">{System.Net.WebUtility.HtmlEncode(name)}</a></p>";
+        PdfImportService.PdfImportResult result;
+        try{result=PdfImportService.Extract(path);}
+        catch(Exception ex)
+        {
+            LogService.Error("Не удалось прочитать текст PDF",ex);
+            return ($"<p>Не удалось прочитать текст PDF: {System.Net.WebUtility.HtmlEncode(ex.Message)}</p>{link}",$"Не удалось прочитать текст PDF. Исходный файл: {name}");
+        }
+        if(!result.HasText)
+            return ($"<p>В этом PDF нет текстового слоя — обычно так выглядят сканы. Текст перенести не удалось, файл сохранён вложением.</p>{link}",
+                    $"В PDF нет текстового слоя. Исходный файл: {name}");
+        var builder=new System.Text.StringBuilder();
+        for(var index=0;index<result.Pages.Count;index++)
+        {
+            var page=result.Pages[index];
+            if(page.Length==0)continue;
+            if(result.Pages.Count>1)builder.Append("<p><strong>Страница ").Append(index+1).Append("</strong></p>");
+            foreach(var line in page.Split('\n'))
+            {
+                if(line.Trim().Length==0)continue;
+                builder.Append("<p>").Append(System.Net.WebUtility.HtmlEncode(line)).Append("</p>");
+            }
+        }
+        builder.Append(link);
+        return (builder.ToString(),result.PlainText);
     }
     private void DatabaseTransfer_Click(object sender,RoutedEventArgs e)
     {
