@@ -360,10 +360,9 @@ public sealed class DocumentExportService
                 }
                 Reserve(drawHeight);
                 gfx.DrawImage(image, margin, y, drawWidth, drawHeight);
-                y += drawHeight + 6;
-                if (!string.IsNullOrWhiteSpace(block.Text))
-                    DrawLines(block.Text, new XFont("Segoe UI", 9.5, XFontStyleEx.Italic), 0, XBrushes.DimGray);
-                y += 6;
+                // Альтернативный текст под картинкой не рисуется: это описание для программ
+                // чтения с экрана, а не подпись. Настоящая подпись приходит отдельным абзацем.
+                y += drawHeight + 12;
             }
             catch
             {
@@ -498,9 +497,9 @@ public sealed class DocumentExportService
             switch (block.Kind)
             {
                 case BlockKind.Image when block.ImagePath is not null:
+                    // Альтернативный текст уходит в свойства рисунка, а не в отдельный абзац.
                     var picture = CreateImageParagraph(main, block.ImagePath, block.Text, ++imageIndex);
                     if (picture is not null) body.Append(picture);
-                    if (!string.IsNullOrWhiteSpace(block.Text)) body.Append(CreateWordParagraph(WebUtility.HtmlEncode(block.Text), null));
                     break;
                 case BlockKind.Heading:
                     body.Append(CreateWordParagraph(WebUtility.HtmlEncode(block.Text), "Heading" + Math.Clamp(block.Level, 1, 6)));

@@ -8,7 +8,9 @@ html,body{margin:0;min-height:100%;background:var(--app);color:var(--text);font:
 ::-webkit-scrollbar-track{background:transparent;border-radius:999px}
 ::-webkit-scrollbar-thumb{background:var(--border-strong);border:3px solid var(--app);border-radius:999px}
 ::-webkit-scrollbar-thumb:hover{background:var(--accent-hover)}
-main{width:100%;max-width:980px;margin:0 auto;padding:30px clamp(24px,5vw,54px);min-height:100vh}
+/* Колонка текста прижата к левому краю и с постоянными полями: при центрировании и полях
+   в процентах от ширины окна текст переезжал, стоило развернуть окно на весь экран. */
+main{width:100%;max-width:980px;margin:0;padding:30px 32px;min-height:100vh}
 .tiptap{outline:none;min-height:75vh;text-align:left;caret-color:var(--text)}
 .tiptap:focus-visible{outline:1px solid transparent}
 .tiptap p.is-editor-empty:first-child::before{content:"Начните писать или нажмите / для выбора блока";float:left;color:var(--muted);pointer-events:none;height:0}

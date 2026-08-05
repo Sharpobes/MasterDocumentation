@@ -413,7 +413,7 @@
               </Button>
             </UniformGrid>
             <!-- Отдельной кнопки «Приложения» нет: инструменты вынесены значками строкой выше. -->
-            <Button Style="{StaticResource NavButton}" Content="▣  Шаблоны" Click="Templates_Click" ToolTip="Открыть шаблоны документов" FontSize="11" Padding="3" Margin="5,3,5,5" />
+            <Button Style="{StaticResource NavButton}" Content="▣  Шаблоны" HorizontalContentAlignment="Center" Click="Templates_Click" ToolTip="Открыть шаблоны документов" FontSize="11" Padding="3" Margin="5,3,5,5" />
           </StackPanel>
           <Grid Grid.Row="4" Background="{DynamicResource Background/SurfaceElevated}">
             <Grid.RowDefinitions>

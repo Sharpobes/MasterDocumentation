@@ -130,16 +130,16 @@ public partial class MainWindow : Window
         var asset=StoreAsset(path);
         var name=Path.GetFileName(path);
         _vm.Database.RegisterAttachment(documentId,name,asset.StoredName,"application/pdf",asset.Size,asset.Hash);
-        var link=$"<p>Исходный файл: <a href=\"https://assets.local/{asset.StoredName}\">{System.Net.WebUtility.HtmlEncode(name)}</a></p>";
+        // Ссылку на исходный файл в текст не добавляем: он и так виден во вложениях документа.
         PdfImportService.PdfImportResult result;
         try{result=PdfImportService.Extract(path);}
         catch(Exception ex)
         {
             LogService.Error("Не удалось прочитать текст PDF",ex);
-            return ($"<p>Не удалось прочитать текст PDF: {System.Net.WebUtility.HtmlEncode(ex.Message)}</p>{link}",$"Не удалось прочитать текст PDF. Исходный файл: {name}");
+            return ($"<p>Не удалось прочитать текст PDF: {System.Net.WebUtility.HtmlEncode(ex.Message)}</p>",$"Не удалось прочитать текст PDF. Исходный файл: {name}");
         }
         if(!result.HasContent)
-            return ($"<p>В этом PDF нет ни текстового слоя, ни изображений, которые удалось бы прочитать. Файл сохранён вложением.</p>{link}",
+            return ($"<p>В этом PDF нет ни текстового слоя, ни изображений, которые удалось бы прочитать. Файл сохранён вложением.</p>",
                     $"В PDF нет читаемого содержимого. Исходный файл: {name}");
         var builder=new System.Text.StringBuilder();
         var imageNumber=0;
@@ -164,7 +164,6 @@ public partial class MainWindow : Window
                 builder.Append("<p><img src=\"https://assets.local/").Append(stored.StoredName).Append("\" alt=\"").Append(System.Net.WebUtility.HtmlEncode(fileName)).Append("\"></p>");
             }
         }
-        builder.Append(link);
         return (builder.ToString(),result.PlainText);
     }
     private void DatabaseTransfer_Click(object sender,RoutedEventArgs e)
