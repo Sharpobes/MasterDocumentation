@@ -16,7 +16,7 @@ public enum AppIconKind
     ListBullet, ListNumbered, Checklist, RotateLeft, RotateRight, Crop, Compress, Replace,
     OpenExternal, WrapLeft, WrapRight, NoWrap, Caption, AltText, Indent, Outdent,
     Subscript, Superscript, ClearFormatting, HorizontalRule, Spoiler, Minus, Calculator,
-    Notification
+    Notification, Home
 }
 
 public sealed class AppIcon : FrameworkElement
@@ -209,6 +209,7 @@ public sealed class IconPresenter : FrameworkElement
         return value switch
         {
             "☰" => AppIconKind.Menu,
+            "⌂" => AppIconKind.Home,
             "×" or "✕" => AppIconKind.Close,
             "—" => AppIconKind.Minimize,
             "□" => AppIconKind.Maximize,
@@ -335,6 +336,7 @@ public sealed class ButtonContentPresenter : ContentPresenter
             "⚠" => AppIconKind.Warning,
             "⛔" => AppIconKind.Error,
             "▾" => AppIconKind.ChevronDown,
+            "⌂" => AppIconKind.Home,
             "⚓" => AppIconKind.Tag,
             "🔗" or "⌁" => AppIconKind.Link,
             "</>" => AppIconKind.Code,

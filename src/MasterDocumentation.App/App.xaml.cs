@@ -26,9 +26,15 @@ public partial class App : Application
         // раньше, чем оно успевало открыться. Обычный режим возвращается после показа окна.
         ShutdownMode=ShutdownMode.OnExplicitShutdown;
         if(Uninstaller.IsRequested(e.Args)){Uninstaller.Run(e.Args);Shutdown();return;}
+        AppPaths.MigrateLegacyDataFolder();
         if(!EnsureWritableStorage()){Shutdown();return;}
         string? firstDocumentTitle=null;
         var bootstrapSettingsService=new SettingsService();var bootstrapSettings=bootstrapSettingsService.Load();
+        LocalizationService.Enable();
+        var initialLanguage=bootstrapSettings.FirstRunCompleted
+            ?bootstrapSettings.Language
+            :System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.Equals("ru",StringComparison.OrdinalIgnoreCase)?LocalizationService.Russian:LocalizationService.English;
+        LocalizationService.SetLanguage(initialLanguage);
         if(!bootstrapSettings.FirstRunCompleted)
         {
             var wizard=new FirstRunWizard();if(wizard.ShowDialog()!=true){Shutdown();return;}
@@ -36,6 +42,7 @@ public partial class App : Application
             {
                 if(!Path.GetFullPath(wizard.SelectedDataPath).Equals(Path.GetFullPath(AppPaths.Data),StringComparison.OrdinalIgnoreCase))AppPaths.SaveDataLocation(wizard.SelectedDataPath,true);
                 AppPaths.Ensure();bootstrapSettings.Language=wizard.SelectedLanguage;bootstrapSettings.Theme=wizard.SelectedTheme;bootstrapSettings.AutomaticBackups=wizard.AutomaticBackups;bootstrapSettings.FirstRunCompleted=true;bootstrapSettings.OpenDocumentIds=[];bootstrapSettings.SelectedDocumentId=null;new SettingsService().Save(bootstrapSettings);firstDocumentTitle=wizard.FirstDocumentTitle;
+                LocalizationService.SetLanguage(wizard.SelectedLanguage);
             }
             catch(Exception ex){LogService.Error("Не удалось завершить первоначальную настройку",ex);MessageBox.Show("Не удалось подготовить выбранное хранилище:\n"+ex.Message,"Первый запуск",MessageBoxButton.OK,MessageBoxImage.Error);Shutdown();return;}
         }
@@ -57,7 +64,7 @@ public partial class App : Application
         catch(Exception first)
         {
             if(MessageBox.Show($"Папка данных недоступна для записи:\n{AppPaths.Data}\n\n{first.Message}\n\nВыбрать другое расположение?","Хранилище недоступно",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes)return false;
-            var dialog=new OpenFolderDialog{Title="Выберите папку для локальных данных MasterDocumentation"};if(dialog.ShowDialog()!=true)return false;
+            var dialog=new OpenFolderDialog{Title=LocalizationService.T("Выберите папку для локальных данных MasterDocumentation")};if(dialog.ShowDialog()!=true)return false;
             try{var target=Path.Combine(dialog.FolderName,"MasterDocumentationData");AppPaths.SaveDataLocation(target,true);AppPaths.Ensure();var probe=Path.Combine(AppPaths.Temp,".write-test");File.WriteAllText(probe,"ok");File.Delete(probe);return true;}
             catch(Exception second){MessageBox.Show("Не удалось подготовить выбранную папку:\n"+second.Message,"Хранилище недоступно",MessageBoxButton.OK,MessageBoxImage.Error);return false;}
         }
@@ -66,7 +73,7 @@ public partial class App : Application
     private void OnDispatcherException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         LogService.Error("Ошибка интерфейса", e.Exception);
-        MessageBox.Show($"Произошла ошибка: {e.Exception.Message}\nПодробности записаны в Data\\Logs.",
+        MessageBox.Show($"Произошла ошибка: {e.Exception.Message}\nПодробности записаны в папку Logs.",
             "MasterDocumentation", MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;
     }

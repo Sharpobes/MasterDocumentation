@@ -932,7 +932,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
         return list;
     }
 
-    public (string StoredName, bool IsUnused) RemoveAttachment(long attachmentId)
+    public (string StoredName, bool IsUnused) RemoveAttachment(long attachmentId, bool ignoreVersions = false)
     {
         string stored; long documentId;
         using (var connection = Open())
@@ -957,9 +957,20 @@ public sealed class PostgresDocumentStore : IDocumentStore
             transaction.Commit();
         }
         RefreshSearchIndex(documentId);
+        if (ignoreVersions)
+        {
+            // Снимки истории с удалённым вложением убираются: иначе автосохранение навсегда
+            // удерживает файл, а восстановление такой версии вернёт ссылку в никуда.
+            using var purge = Open();
+            using var purgeCommand = purge.CreateCommand();
+            purgeCommand.CommandText = "DELETE FROM DocumentVersions WHERE IsPinned=false AND (EditorJson LIKE @like OR Html LIKE @like)";
+            purgeCommand.Parameters.AddWithValue("like", "%" + stored + "%");
+            purgeCommand.ExecuteNonQuery();
+        }
         using var check = Open();
         using var command = check.CreateCommand();
-        command.CommandText = "SELECT (SELECT COUNT(*) FROM Attachments WHERE StoredName=@name)+(SELECT COUNT(*) FROM Nodes WHERE EditorJson LIKE @like OR Html LIKE @like)+(SELECT COUNT(*) FROM DocumentVersions WHERE EditorJson LIKE @like OR Html LIKE @like)";
+        command.CommandText = "SELECT (SELECT COUNT(*) FROM Attachments WHERE StoredName=@name)+(SELECT COUNT(*) FROM Nodes WHERE EditorJson LIKE @like OR Html LIKE @like)"
+            + (ignoreVersions ? "" : "+(SELECT COUNT(*) FROM DocumentVersions WHERE EditorJson LIKE @like OR Html LIKE @like)");
         command.Parameters.AddWithValue("name", stored);
         command.Parameters.AddWithValue("like", "%" + stored + "%");
         return (stored, (long)command.ExecuteScalar()! == 0);

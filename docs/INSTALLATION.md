@@ -4,20 +4,20 @@
 
 Откройте [страницу всех релизов](https://github.com/Sharpobes/MasterDocumentation/releases). GitHub хранит каждую опубликованную версию отдельно, поэтому можно скачать как последнюю, так и предыдущую сборку.
 
-Для версии 1.2.2 используйте:
+Для версии 1.3.0 используйте:
 
-- [установщик v1.2.2](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.2.2/MasterDocumentation-Setup-v1.2.2.exe) — графическая установка;
-- [portable ZIP v1.2.2](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.2.2/MasterDocumentation-v1.2.2-win-x64.zip) — распаковка вручную;
-- [SHA-256 установщика](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.2.2/MasterDocumentation-Setup-v1.2.2.exe.sha256) и [SHA-256 архива](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.2.2/MasterDocumentation-v1.2.2-win-x64.zip.sha256).
+- [установщик v1.3.0](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.3.0/MasterDocumentation-Setup-v1.3.0.exe) — графическая установка;
+- [portable ZIP v1.3.0](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.3.0/MasterDocumentation-v1.3.0-win-x64.zip) — распаковка вручную;
+- [SHA-256 установщика](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.3.0/MasterDocumentation-Setup-v1.3.0.exe.sha256) и [SHA-256 архива](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.3.0/MasterDocumentation-v1.3.0-win-x64.zip.sha256).
 
 Если репозиторий закрыт (private), ссылки на файлы релиза открываются только у участников с доступом. Чтобы их мог скачать любой пользователь, репозиторий нужно сделать публичным: **Settings → General → Danger Zone → Change repository visibility → Public**.
 
 ## Установка через установщик
 
-1. Скачайте `MasterDocumentation-Setup-v1.2.2.exe` из блока **Assets** на странице релиза.
+1. Скачайте `MasterDocumentation-Setup-v1.3.0.exe` из блока **Assets** на странице релиза.
 2. Запустите файл. Откроется окно установки с двумя режимами:
    - **Установить на компьютер** — ярлыки на рабочем столе и в меню «Пуск», запись в «Программы и компоненты», документация в профиле пользователя;
-   - **Портативная версия** — приложение и папка `Data` в одной папке, реестр и система не изменяются.
+   - **Портативная версия** — приложение и его документация в одной папке, реестр и система не изменяются.
 3. При необходимости измените папку кнопкой «Обзор…».
 4. Отметьте нужные ярлыки и нажмите «Установить» (или «Распаковать» для портативного режима).
 5. После завершения приложение запустится автоматически, если оставлена соответствующая галочка.
@@ -31,7 +31,7 @@
 1. Скачайте ZIP нужной версии из блока **Assets** на странице релиза.
 2. Создайте локальную папку, например `D:\Apps\MasterDocumentation`.
 3. Распакуйте в неё **весь** архив с сохранением структуры каталогов.
-4. Проверьте, что рядом с `MasterDocumentation.exe` находятся папки `Editor` и `WebView2`.
+4. Проверьте, что рядом с `MasterDocumentation.exe` находится папка `Runtime`.
 5. Запустите `MasterDocumentation.exe`.
 6. В мастере первого запуска выберите язык, тему, папку данных и режим резервного копирования.
 
@@ -51,15 +51,15 @@
 В PowerShell выполните:
 
 ```powershell
-Get-FileHash .\MasterDocumentation-Setup-v1.2.2.exe -Algorithm SHA256
-Get-Content .\MasterDocumentation-Setup-v1.2.2.exe.sha256
+Get-FileHash .\MasterDocumentation-Setup-v1.3.0.exe -Algorithm SHA256
+Get-Content .\MasterDocumentation-Setup-v1.3.0.exe.sha256
 ```
 
 Хеши должны совпасть. Файлы `.sha256` создаёт тот же workflow, который собирает релиз.
 
 ## Первый запуск
 
-Портативная версия создаёт `Data` рядом с EXE, установленная — в `%LOCALAPPDATA%\MasterDocumentation\Data`. В этой папке находятся база SQLite, настройки, вложения, резервные копии, экспортированные документы, `.md`-зеркала страниц, журналы и аварийные черновики. Демонстрационные документы автоматически не создаются.
+Портативная версия хранит документацию в своей папке рядом с EXE, установленная — в `%LOCALAPPDATA%\MasterDocumentation\Data`. Там лежат база SQLite `master-documentation.db`, `settings.json` и папки `Assets`, `Documents`, `Backups`, `Exports`, `Logs`, `Temp`. Служебные файлы редактора и фиксированный WebView2 Runtime вынесены отдельно, в папку `Runtime`. Хранилище прежних версий из подпапки `Data` переносится в корень при первом запуске новой версии. Демонстрационные документы автоматически не создаются.
 
 Если нужна отдельная папка, выберите её в мастере или позднее в `Настройки → Хранение → Изменить папку`. Перенос выполняется через временную копию с последующей проверкой `PRAGMA integrity_check`.
 
@@ -84,11 +84,11 @@ Get-Content .\MasterDocumentation-Setup-v1.2.2.exe.sha256
 1. В приложении создайте резервную копию: `Настройки → Хранение → Создать резервную копию`.
 2. Закройте MasterDocumentation.
 3. Скачайте и распакуйте новую версию в новую папку.
-4. Скопируйте старую папку `Data` и файл `data-location.txt` в новую папку приложения. Если использовалось внешнее хранилище, достаточно перенести `data-location.txt`.
+4. Скопируйте из старой папки `master-documentation.db`, `settings.json`, папки `Assets`, `Documents`, `Backups`, `Exports` и файл `data-location.txt` в новую папку приложения. Если использовалось внешнее хранилище, достаточно перенести `data-location.txt`.
 5. Запустите новую версию и проверьте документы.
 6. Старую папку удаляйте только после проверки.
 
-Не копируйте `Data` при работающем приложении: база может находиться в режиме WAL.
+Не копируйте хранилище при работающем приложении: база может находиться в режиме WAL.
 
 ## Удаление
 
@@ -115,7 +115,7 @@ Get-Content .\MasterDocumentation-Setup-v1.2.2.exe.sha256
 ## Если приложение не запускается
 
 - распакуйте архив полностью, не запускайте EXE из ZIP;
-- убедитесь, что папки `Editor` и `WebView2` находятся рядом с EXE;
+- убедитесь, что папка `Runtime` с подпапками `Editor` и `WebView2` находится рядом с EXE;
 - переместите приложение из сетевой/UNC-папки на локальный диск — Fixed Version WebView2 не поддерживает запуск из сетевого расположения;
 - проверьте наличие свободного места и прав на запись;
-- откройте `Data\Logs` и приложите последний журнал к GitHub Issue.
+- откройте папку `Logs` и приложите последний журнал к GitHub Issue.

@@ -7,13 +7,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>MasterDocumentation</RootNamespace>
     <AssemblyName>MasterDocumentation</AssemblyName>
-    <Version>1.2.0-beta</Version>
+    <Version>1.3.0</Version>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
-    <!-- Все библиотеки упакованы в сам EXE: иначе рядом с ним лежат сотни файлов и найти
-         MasterDocumentation.exe в папке трудно. Фиксированный WebView2 Runtime и файлы
-         редактора остаются отдельными папками — они подключаются как обычные файлы. -->
+    <!-- Все библиотеки упакованы в сам EXE, включая машинный код: рядом с приложением остаются
+         только папки хранилища (Assets, Documents, Logs, Backups, Exports) и одна папка Runtime
+         с файлами редактора и фиксированным WebView2 Runtime. -->
     <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <SatelliteResourceLanguages>ru</SatelliteResourceLanguages>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -25,5 +26,20 @@
     <PackageReference Include="WebView2.Runtime.X64" Version="150.0.4078.65" />
   </ItemGroup>
   <ItemGroup><ProjectReference Include="..\MasterDocumentation.Core\MasterDocumentation.Core.csproj"/><ProjectReference Include="..\MasterDocumentation.Infrastructure\MasterDocumentation.Infrastructure.csproj"/><ProjectReference Include="..\MasterDocumentation.Backup\MasterDocumentation.Backup.csproj"/><ProjectReference Include="..\MasterDocumentation.Export\MasterDocumentation.Export.csproj"/><ProjectReference Include="..\MasterDocumentation.Editor\MasterDocumentation.Editor.csproj"/></ItemGroup>
-  <ItemGroup><Content Include="..\MasterDocumentation.Editor\web\dist\**\*"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><TargetPath>Editor\%(RecursiveDir)%(Filename)%(Extension)</TargetPath></Content></ItemGroup>
+  <ItemGroup><Content Include="..\MasterDocumentation.Editor\web\dist\**\*"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><TargetPath>Runtime\Editor\%(RecursiveDir)%(Filename)%(Extension)</TargetPath></Content></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Localization\English.json" /></ItemGroup>
+  <!-- Фиксированный WebView2 Runtime приходит из пакета папкой WebView2 рядом с приложением.
+       Он переносится в Runtime вместе с файлами редактора, чтобы возле MasterDocumentation.exe
+       оставались только папки хранилища. Загрузчик WebView2Loader.dll не трогаем: в обычной
+       сборке его ищут по пути runtimes\<архитектура>\native рядом с приложением. -->
+  <Target Name="MoveRuntimeFilesToRuntimeFolder" AfterTargets="AssignTargetPaths">
+    <ItemGroup>
+      <_RuntimeFolderContent Include="@(ContentWithTargetPath)" Condition="$([System.String]::new('%(ContentWithTargetPath.TargetPath)').StartsWith('WebView2\'))" />
+      <ContentWithTargetPath Remove="@(_RuntimeFolderContent)" />
+      <ContentWithTargetPath Include="@(_RuntimeFolderContent)" TargetPath="Runtime\%(_RuntimeFolderContent.TargetPath)" Link="Runtime\%(_RuntimeFolderContent.TargetPath)" />
+      <_RuntimeFolderNone Include="@(_NoneWithTargetPath)" Condition="$([System.String]::new('%(_NoneWithTargetPath.TargetPath)').StartsWith('WebView2\'))" />
+      <_NoneWithTargetPath Remove="@(_RuntimeFolderNone)" />
+      <_NoneWithTargetPath Include="@(_RuntimeFolderNone)" TargetPath="Runtime\%(_RuntimeFolderNone.TargetPath)" Link="Runtime\%(_RuntimeFolderNone.TargetPath)" />
+    </ItemGroup>
+  </Target>
 </Project>

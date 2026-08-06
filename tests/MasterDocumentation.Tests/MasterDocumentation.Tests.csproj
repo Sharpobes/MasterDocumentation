@@ -25,6 +25,7 @@
     <ProjectReference Include="..\..\src\MasterDocumentation.Infrastructure\MasterDocumentation.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\MasterDocumentation.Backup\MasterDocumentation.Backup.csproj" />
     <ProjectReference Include="..\..\src\MasterDocumentation.Export\MasterDocumentation.Export.csproj" />
+    <ProjectReference Include="..\..\src\MasterDocumentation.App\MasterDocumentation.App.csproj" />
   </ItemGroup>
 
 </Project>

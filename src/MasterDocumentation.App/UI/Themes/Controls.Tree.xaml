@@ -42,7 +42,10 @@
         <Setter Property="Foreground" Value="{DynamicResource Text/Primary}"/>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRingStyle}"/>
+        <!-- Собственного кольца фокуса нет: рамку рисует сам шаблон по IsKeyboardFocusWithin.
+             Системное кольцо WPF включается при нажатии Alt (в том числе Alt+Tab) и выглядело
+             как второе выделение поверх строки дерева. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type TreeViewItem}">
@@ -76,7 +79,7 @@
         <Setter Property="Foreground" Value="{DynamicResource Text/Primary}"/>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRingStyle}"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type ListBoxItem}">

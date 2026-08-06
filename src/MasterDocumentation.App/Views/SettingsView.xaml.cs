@@ -24,12 +24,13 @@ public partial class SettingsView : UserControl
     private List<HotkeySetting> _hotkeys=[];
     private bool _loading=true;
     private bool _dirty;
+    private readonly string _initialLanguage;
     public event Action<ApplicationSettings>? SettingsSaved;
     public event Action? CloseRequested;
 
     public SettingsView(DatabaseService database,BackupService backups,SettingsService settingsService)
     {
-        InitializeComponent();_database=database;_backups=backups;_settingsService=settingsService;_settings=_settingsService.Load();
+        InitializeComponent();_database=database;_backups=backups;_settingsService=settingsService;_settings=_settingsService.Load();_initialLanguage=_settings.Language;
         _panels=[GeneralPanel,StoragePanel,EditorPanel,InterfacePanel,DocumentsPanel,HotkeysPanel,SecurityPanel,AboutPanel];
         DefaultFontBox.ItemsSource=Fonts.SystemFontFamilies.OrderBy(x=>x.Source);LoadValues();LoadStatistics();ShowPanel(0,"Общие");_loading=false;
     }
@@ -45,7 +46,7 @@ public partial class SettingsView : UserControl
 
     private void LoadStatistics()
     {
-        var dataBytes=DirectorySize(AppPaths.Data);var dbBytes=File.Exists(AppPaths.Database)?new FileInfo(AppPaths.Database).Length:0;var assetsBytes=DirectorySize(AppPaths.Assets);var attachments=Directory.Exists(AppPaths.Assets)?Directory.EnumerateFiles(AppPaths.Assets,"*",SearchOption.AllDirectories).LongCount():0;var drive=new DriveInfo(Path.GetPathRoot(AppPaths.Data)!);var used=drive.TotalSize==0?0:(double)(drive.TotalSize-drive.AvailableFreeSpace)/drive.TotalSize*100;
+        var dataBytes=StorageSize();var dbBytes=File.Exists(AppPaths.Database)?new FileInfo(AppPaths.Database).Length:0;var assetsBytes=DirectorySize(AppPaths.Assets);var attachments=Directory.Exists(AppPaths.Assets)?Directory.EnumerateFiles(AppPaths.Assets,"*",SearchOption.AllDirectories).LongCount():0;var drive=new DriveInfo(Path.GetPathRoot(AppPaths.Data)!);var used=drive.TotalSize==0?0:(double)(drive.TotalSize-drive.AvailableFreeSpace)/drive.TotalSize*100;
         StoragePathText.Text=AppPaths.Data;StorageStatsText.Text=$"Данные: {FormatBytes(dataBytes)}\nБаза: {FormatBytes(dbBytes)}\nВложения: {FormatBytes(assetsBytes)} ({attachments})\nДокументы: {_database.CountDocuments()}\nДиск занят на {used:F0}%";DiskUsageBar.Value=used;
         var last=Directory.Exists(AppPaths.Backups)?Directory.EnumerateFiles(AppPaths.Backups).Select(x=>new FileInfo(x)).OrderByDescending(x=>x.LastWriteTimeUtc).FirstOrDefault():null;LastBackupText.Text=last is null?"Резервных копий ещё нет":$"Последняя копия: {last.LastWriteTime:g}, {FormatBytes(last.Length)}";
     }
@@ -63,8 +64,8 @@ public partial class SettingsView : UserControl
         _loading=wasLoading;
     }
 
-    private static void SelectCombo(ComboBox box,string value)=>box.SelectedItem=box.Items.OfType<ComboBoxItem>().FirstOrDefault(x=>x.Content?.ToString()==value);
-    private static string Selected(ComboBox box)=>(box.SelectedItem as ComboBoxItem)?.Content?.ToString()??box.Text;
+    private static void SelectCombo(ComboBox box,string value)=>box.SelectedItem=box.Items.OfType<ComboBoxItem>().FirstOrDefault(x=>LocalizationService.SourceContent(x)==value||x.Content?.ToString()==value);
+    private static string Selected(ComboBox box)=>box.SelectedItem is ComboBoxItem item?LocalizationService.SourceContent(item):box.Text;
     private void ShowPanel(int index,string title)
     {
         for(var i=0;i<_panels.Length;i++)
@@ -118,6 +119,13 @@ public partial class SettingsView : UserControl
     private void Control_Changed(object sender,RoutedEventArgs e)=>MarkDirty();
     private void Control_Changed(object sender,TextChangedEventArgs e)=>MarkDirty();
     private void Control_Changed(object sender,SelectionChangedEventArgs e)=>MarkDirty();
+    private void Language_Changed(object sender,SelectionChangedEventArgs e)
+    {
+        if(_loading||LanguageBox.SelectedItem is not ComboBoxItem item)return;
+        LocalizationService.SetLanguage(LocalizationService.SourceContent(item));
+        if(Window.GetWindow(this) is DependencyObject root)LocalizationService.Apply(root);else LocalizationService.Apply(this);
+        MarkDirty();
+    }
     private void MarkDirty(){if(_loading)return;_dirty=true;SaveButton.IsEnabled=true;}
     private void RecentMinus_Click(object sender,RoutedEventArgs e){RecentCountText.Text=Math.Max(1,int.Parse(RecentCountText.Text)-1).ToString();MarkDirty();}
     private void RecentPlus_Click(object sender,RoutedEventArgs e){RecentCountText.Text=Math.Min(100,int.Parse(RecentCountText.Text)+1).ToString();MarkDirty();}
@@ -189,17 +197,17 @@ public partial class SettingsView : UserControl
     private void Cancel_Click(object sender,RoutedEventArgs e){if(RequestClose())CloseRequested?.Invoke();}
     public bool RequestClose()
     {
-        if(!_dirty)return true;var answer=MessageBox.Show(Window.GetWindow(this),"Сохранить изменения настроек?","Несохранённые изменения",MessageBoxButton.YesNoCancel,MessageBoxImage.Question);if(answer==MessageBoxResult.Cancel)return false;if(answer==MessageBoxResult.Yes)return SaveSettings();return true;
+        if(!_dirty)return true;var answer=MessageBox.Show(Window.GetWindow(this),"Сохранить изменения настроек?","Несохранённые изменения",MessageBoxButton.YesNoCancel,MessageBoxImage.Question);if(answer==MessageBoxResult.Cancel)return false;if(answer==MessageBoxResult.Yes)return SaveSettings();LocalizationService.SetLanguage(_initialLanguage);return true;
     }
-    private void Reset_Click(object sender,RoutedEventArgs e){if(MessageBox.Show(Window.GetWindow(this),"Вернуть настройки по умолчанию?","Сброс",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes)return;_settings=new ApplicationSettings();_loading=true;LoadValues();_loading=false;MarkDirty();}
+    private void Reset_Click(object sender,RoutedEventArgs e){if(MessageBox.Show(Window.GetWindow(this),"Вернуть настройки по умолчанию?","Сброс",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes)return;_settings=new ApplicationSettings();_loading=true;LoadValues();_loading=false;LocalizationService.SetLanguage(_settings.Language);MarkDirty();}
 
     private static void OpenFolder(string path){Directory.CreateDirectory(path);Process.Start(new ProcessStartInfo("explorer.exe",$"\"{path}\""){UseShellExecute=true});}
     private void OpenData_Click(object sender,RoutedEventArgs e)=>OpenFolder(AppPaths.Data);
     private async void ChangeDataPath_Click(object sender,RoutedEventArgs e)
     {
-        var owner=Window.GetWindow(this);var dialog=new OpenFolderDialog{Title="Выберите папку, внутри которой будет создано хранилище MasterDocumentationData"};if(dialog.ShowDialog(owner)!=true)return;var source=Path.GetFullPath(AppPaths.Data);var target=Path.GetFullPath(Path.Combine(dialog.FolderName,"MasterDocumentationData"));
+        var owner=Window.GetWindow(this);var dialog=new OpenFolderDialog{Title=LocalizationService.T("Выберите папку, внутри которой будет создано хранилище MasterDocumentationData")};if(dialog.ShowDialog(owner)!=true)return;var source=Path.GetFullPath(AppPaths.Data);var target=Path.GetFullPath(Path.Combine(dialog.FolderName,"MasterDocumentationData"));
         if(target.Equals(source,StringComparison.OrdinalIgnoreCase)){MessageBox.Show(owner,"Это уже текущая папка данных.","Хранилище");return;}var prefix=source.TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;if(target.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)){MessageBox.Show(owner,"Новое хранилище нельзя размещать внутри текущей папки данных.","Хранилище",MessageBoxButton.OK,MessageBoxImage.Warning);return;}
-        if(Directory.Exists(target)&&Directory.EnumerateFileSystemEntries(target).Any()){MessageBox.Show(owner,$"Папка уже существует и не пуста:\n{target}\n\nВыберите другое расположение.","Хранилище",MessageBoxButton.OK,MessageBoxImage.Warning);return;}var required=DirectorySize(source);var drive=new DriveInfo(Path.GetPathRoot(target)!);if(drive.AvailableFreeSpace<required+50L*1024*1024){MessageBox.Show(owner,"В выбранном расположении недостаточно свободного места.","Хранилище",MessageBoxButton.OK,MessageBoxImage.Warning);return;}
+        if(Directory.Exists(target)&&Directory.EnumerateFileSystemEntries(target).Any()){MessageBox.Show(owner,$"Папка уже существует и не пуста:\n{target}\n\nВыберите другое расположение.","Хранилище",MessageBoxButton.OK,MessageBoxImage.Warning);return;}var required=StorageSize();var drive=new DriveInfo(Path.GetPathRoot(target)!);if(drive.AvailableFreeSpace<required+50L*1024*1024){MessageBox.Show(owner,"В выбранном расположении недостаточно свободного места.","Хранилище",MessageBoxButton.OK,MessageBoxImage.Warning);return;}
         if(MessageBox.Show(owner,$"Скопировать данные в новое хранилище?\n\n{target}\n\nПосле проверки приложение перезапустится. Старые данные останутся в {source}.","Перенос данных",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
         var temporary=target+".migration-"+Guid.NewGuid().ToString("N");StorageStatsText.Text="Перенос данных… Не закрывайте приложение.";Mouse.OverrideCursor=Cursors.Wait;
         try
@@ -292,6 +300,46 @@ public partial class SettingsView : UserControl
         SettingsNavigationColumn.Width=new GridLength(width<760?190:width<960?208:225);
     }
     private static long DirectorySize(string path){if(!Directory.Exists(path))return 0;try{return Directory.EnumerateFiles(path,"*",SearchOption.AllDirectories).Sum(x=>{try{return new FileInfo(x).Length;}catch{return 0;}});}catch{return 0;}}
-    private static void CopyDataDirectory(string source,string target){Directory.CreateDirectory(target);foreach(var directory in Directory.EnumerateDirectories(source,"*",SearchOption.AllDirectories)){var relative=Path.GetRelativePath(source,directory);if(relative.StartsWith(Path.Combine("Temp","WebView2"),StringComparison.OrdinalIgnoreCase))continue;Directory.CreateDirectory(Path.Combine(target,relative));}foreach(var file in Directory.EnumerateFiles(source,"*",SearchOption.AllDirectories)){var relative=Path.GetRelativePath(source,file);if(relative.StartsWith(Path.Combine("Temp","WebView2"),StringComparison.OrdinalIgnoreCase))continue;var destination=Path.Combine(target,relative);Directory.CreateDirectory(Path.GetDirectoryName(destination)!);using var input=new FileStream(file,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);using var output=new FileStream(destination,FileMode.CreateNew,FileAccess.Write,FileShare.None);input.CopyTo(output);}}
+    /// <summary>Размер хранилища считается по его содержимому: рядом могут лежать сам EXE и папка Runtime.</summary>
+    private static long StorageSize(){return AppPaths.DataEntries.Sum(entry=>Directory.Exists(entry)?DirectorySize(entry):File.Exists(entry)?SafeLength(entry):0);}
+    private static long SafeLength(string path){try{return new FileInfo(path).Length;}catch{return 0;}}
+    /// <summary>
+    /// Копируется только содержимое хранилища из явного списка: папка данных по умолчанию
+    /// совпадает с папкой приложения, и копировать её целиком нельзя.
+    /// </summary>
+    private static void CopyDataDirectory(string source,string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach(var entry in AppPaths.DataEntries)
+        {
+            var relative=Path.GetRelativePath(source,entry);
+            if(relative.StartsWith("..",StringComparison.Ordinal))continue;
+            if(Directory.Exists(entry))CopyTree(entry,Path.Combine(target,relative));
+            else if(File.Exists(entry))CopyFile(entry,Path.Combine(target,relative));
+        }
+    }
+    private static void CopyTree(string source,string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach(var directory in Directory.EnumerateDirectories(source,"*",SearchOption.AllDirectories))
+        {
+            var relative=Path.GetRelativePath(source,directory);
+            if(relative.StartsWith("WebView2",StringComparison.OrdinalIgnoreCase))continue;
+            Directory.CreateDirectory(Path.Combine(target,relative));
+        }
+        foreach(var file in Directory.EnumerateFiles(source,"*",SearchOption.AllDirectories))
+        {
+            var relative=Path.GetRelativePath(source,file);
+            if(relative.StartsWith("WebView2",StringComparison.OrdinalIgnoreCase))continue;
+            CopyFile(file,Path.Combine(target,relative));
+        }
+    }
+    private static void CopyFile(string source,string destination)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        using var input=new FileStream(source,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);
+        using var output=new FileStream(destination,FileMode.Create,FileAccess.Write,FileShare.None);
+        input.CopyTo(output);
+    }
     private static string FormatBytes(long value){string[] units=["Б","КБ","МБ","ГБ","ТБ"];var size=(double)value;var i=0;while(size>=1024&&i<units.Length-1){size/=1024;i++;}return $"{size:0.##} {units[i]}";}
 }

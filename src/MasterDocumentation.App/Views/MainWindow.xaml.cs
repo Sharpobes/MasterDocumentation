@@ -37,7 +37,7 @@ public sealed class OutlineItem : INotifyPropertyChanged
 
 public partial class MainWindow : Window
 {
-    private readonly MainViewModel _vm; private readonly SettingsService _settingsService; private ApplicationSettings _settings; private readonly System.Windows.Threading.DispatcherTimer _saveTimer; private readonly System.Windows.Threading.DispatcherTimer _draftTimer; private readonly System.Windows.Threading.DispatcherTimer _highlightTimer; private readonly ObservableCollection<AttachmentInfo> _attachments=[]; private readonly ObservableCollection<string> _tags=[]; private readonly ObservableCollection<string> _visibleTags=[]; private readonly ObservableCollection<DocumentSearchResult> _searchResults=[]; private DocumentTab? _pendingDraft; private SettingsView? _settingsView; private bool _loading; private bool _highlighting; private bool _closeInProgress; private bool _closeCommitted; private bool _resettingHeadingSelector; private bool _updatingToolbarState; private bool _modernImageSelected; private string _selectedImageSource=""; private string _selectedImageAlt=""; private string _selectedImageCaption=""; private string _selectedImageWrap="none"; private double? _spaceBefore; private double? _spaceAfter; private double? _firstIndent; private double? _leftIndent; private double? _rightIndent; private string? _textDirection; private string _outlineSignature=""; private long _outlineDocumentId; private double _zoom=1; private Point _dragStart;
+    private readonly MainViewModel _vm; private readonly SettingsService _settingsService; private ApplicationSettings _settings; private readonly System.Windows.Threading.DispatcherTimer _saveTimer; private readonly System.Windows.Threading.DispatcherTimer _draftTimer; private readonly System.Windows.Threading.DispatcherTimer _highlightTimer; private readonly ObservableCollection<AttachmentInfo> _attachments=[]; private readonly ObservableCollection<string> _tags=[]; private readonly ObservableCollection<string> _visibleTags=[]; private readonly ObservableCollection<DocumentSearchResult> _searchResults=[]; private DocumentTab? _pendingDraft; private SettingsView? _settingsView; private bool _loading; private bool _highlighting; private bool _closeInProgress; private bool _closeCommitted; private bool _updatingToolbarState; private bool _modernImageSelected; private string _selectedImageSource=""; private string _selectedImageAlt=""; private string _selectedImageCaption=""; private string _selectedImageWrap="none"; private double? _spaceBefore; private double? _spaceAfter; private double? _firstIndent; private double? _leftIndent; private double? _rightIndent; private string? _textDirection; private string _outlineSignature=""; private long _outlineDocumentId; private double _zoom=1; private Point _dragStart;
     private int _responsiveLayoutMode = -1;
     private GridLength _wideStructureWidth = new(225);
     private GridLength _widePropertiesWidth = new(265);
@@ -60,6 +60,18 @@ public partial class MainWindow : Window
     private const double LibraryMinWidth=215;
     private Point _tabDragStart;
     private DocumentTab? _draggedTab;
+    /// <summary>Узел, по которому нажали мышью: перетаскивание и контекстное меню работают с ним, а не с ранее выбранным.</summary>
+    private NodeItem? _dragNode;
+    private NodeItem? _contextMenuNode;
+    /// <summary>Главная страница показана поверх открытого документа: вкладки при этом не закрываются.</summary>
+    private bool _startPageVisible;
+    private DragGhostAdorner? _dragGhost;
+    /// <summary>Буфер библиотеки: что вырезано или скопировано сочетаниями Ctrl+X и Ctrl+C.</summary>
+    private (long Id,string Title,bool Cut)? _libraryClipboard;
+    /// <summary>История операций библиотеки для Ctrl+Z: перемещения, удаления и вставки.</summary>
+    private readonly Stack<LibraryAction> _libraryHistory=new();
+    private enum LibraryActionKind{Move,Delete,Create}
+    private sealed record LibraryAction(LibraryActionKind Kind,long Id,long? PreviousParentId,string Title);
     public MainWindow(MainViewModel viewModel, SettingsService settingsService)
     {
         InitializeComponent(); ToastService.Initialize(this); ToastService.UnreadChanged+=(_,_)=>UpdateNotificationBadge(); UpdateNotificationBadge(); ShowPreReleaseBadge(); Tabs.HorizontalAlignment=HorizontalAlignment.Left;Tabs.MaxWidth=720;Tabs.PreviewMouseLeftButtonDown+=Tabs_PreviewMouseLeftButtonDown;Tabs.PreviewMouseMove+=Tabs_PreviewMouseMove;Tabs.PreviewMouseUp+=(_,_)=>_draggedTab=null;Tabs.PreviewMouseDown+=Tabs_PreviewMouseDown;SettingsHost.SizeChanged+=SettingsHost_SizeChanged; _vm = viewModel; _settingsService = settingsService; DataContext = _vm; AttachmentList.ItemsSource=_attachments;TagChips.ItemsSource=_visibleTags;TagEditorList.ItemsSource=_tags;SearchResultsList.ItemsSource=_searchResults;ModernEditor.DataFolder=AppPaths.Data;StorageLocationText.Text=AppPaths.Data;StorageLocationText.ToolTip=AppPaths.Data;
@@ -71,22 +83,19 @@ public partial class MainWindow : Window
         _highlightTimer = new() { Interval = TimeSpan.FromMilliseconds(450) }; _highlightTimer.Tick += (_, _) => { _highlightTimer.Stop(); HighlightCodeBlocks(); };
         UpdateNavigationCounts();
         RestoreWindow();RestorePanelLayout(); Loaded += (_, _) => { ConfigureAccessibility();RecoverEmergencyDrafts(); RestoreSession(); AutoBackupIfNeeded(); PurgeExpiredTrash(); UpdateNavigationCounts(); if(_settings.CheckUpdates)_=CheckForUpdatesAsync(true); }; Deactivated += (_, _) => _vm.SaveAll();
-        AddHandler(Hyperlink.RequestNavigateEvent, new System.Windows.Navigation.RequestNavigateEventHandler((_, e) => { try { Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true }); } catch (Exception ex) { LogService.Error("Не удалось открыть ссылку", ex); } e.Handled = true; }));
+        AddHandler(Hyperlink.RequestNavigateEvent, new System.Windows.Navigation.RequestNavigateEventHandler((_, e) => { OpenExternalLink(e.Uri); e.Handled = true; }));
     }
 
     private void Tree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e) => _vm.SelectedNode = e.NewValue as NodeItem;
     private void Tree_DoubleClick(object sender, MouseButtonEventArgs e) { if (_vm.SelectedNode is not null) _vm.Open(_vm.SelectedNode); }
     private void OpenNode_Click(object sender, RoutedEventArgs e) { if (_vm.SelectedNode is not null) _vm.Open(_vm.SelectedNode); }
     private long? TargetFolder() => _vm.SelectedNode is null ? null : _vm.SelectedNode.IsFolder ? _vm.SelectedNode.Id : _vm.SelectedNode.ParentId;
-    private void CreateMenu_Click(object sender,RoutedEventArgs e){CreateMenuPopup.PlacementTarget=sender as UIElement;CreateMenuPopup.IsOpen=true;}
+    private void CreateMenu_Click(object sender,RoutedEventArgs e){CreateMenuPopup.PlacementTarget=sender as UIElement??SectionAddButton;CreateMenuPopup.HorizontalOffset=ReferenceEquals(sender,SectionAddButton)?-200:0;CreateMenuPopup.IsOpen=!CreateMenuPopup.IsOpen;}
     private void NewDocument_Click(object sender, RoutedEventArgs e){CreateMenuPopup.IsOpen=false;CreateNode(false);}
+    /// <summary>Раздела как отдельной сущности нет: раздел — это обычная папка верхнего уровня.</summary>
     private void NewFolder_Click(object sender, RoutedEventArgs e){CreateMenuPopup.IsOpen=false;CreateNode(true);}
-    private void NewFromTemplate_Click(object sender,RoutedEventArgs e){CreateMenuPopup.IsOpen=false;if(_vm.Database.LoadTemplates().Count==0){MessageBox.Show(this,"Сначала создайте шаблон из документа или через пункт «Новый шаблон».","Шаблоны");return;}CreateNode(false);}
     private void NewTemplate_Click(object sender,RoutedEventArgs e){CreateMenuPopup.IsOpen=false;var id=CreateNode(false);if(id is long value){_vm.Database.SetTemplate(value,true);_vm.ReloadTree();}}
-    private void NewSection_Click(object sender,RoutedEventArgs e){CreateMenuPopup.IsOpen=false;var prompt=new TextPrompt("Новый раздел",""){Owner=this};if(prompt.ShowDialog()!=true)return;try{_vm.Database.Create(null,true,prompt.Value);_vm.ReloadTree();UpdateNavigationCounts();}catch(Exception ex){MessageBox.Show(this,ex.Message,"Не удалось создать раздел",MessageBoxButton.OK,MessageBoxImage.Warning);}}
-    private void SectionAdd_Click(object sender,RoutedEventArgs e)=>SectionAddPopup.IsOpen=!SectionAddPopup.IsOpen;
-    private void SectionAddDocument_Click(object sender,RoutedEventArgs e){SectionAddPopup.IsOpen=false;CreateNode(false);}
-    private void SectionAddFolder_Click(object sender,RoutedEventArgs e){SectionAddPopup.IsOpen=false;CreateNode(true);}
+    private void SectionAdd_Click(object sender,RoutedEventArgs e)=>CreateMenu_Click(SectionAddButton,e);
     private long? CreateNode(bool folder)
     {
         var roots=_vm.Database.LoadTree();var storage=_vm.Database.ActiveProvider==MasterDocumentation.Storage.StorageProviderKind.Postgres?$"Хранилище: общая база данных PostgreSQL, вы подключены как «{UserIdentity.Current}».":"Хранилище: локальная база. Признак приватности сохранится при выгрузке документа в общую базу данных.";var dialog=new NewItemDialog(roots,_vm.Database.LoadTemplates(),folder,TargetFolder(),storage){Owner=this};if(dialog.ShowDialog()!=true)return null;
@@ -106,7 +115,7 @@ public partial class MainWindow : Window
     }
     private void ImportDocument_Click(object sender,RoutedEventArgs e)
     {
-        CreateMenuPopup.IsOpen=false;var dialog=new OpenFileDialog{Title="Импорт документа",Filter="Поддерживаемые документы|*.docx;*.html;*.htm;*.md;*.markdown;*.txt;*.rtf;*.pdf|Word (*.docx)|*.docx|HTML (*.html;*.htm)|*.html;*.htm|Markdown (*.md;*.markdown)|*.md;*.markdown|Текст (*.txt)|*.txt|RTF (*.rtf)|*.rtf|PDF (*.pdf)|*.pdf"};if(dialog.ShowDialog(this)!=true)return;
+        CreateMenuPopup.IsOpen=false;var dialog=new OpenFileDialog{Title=LocalizationService.T("Импорт документа"),Filter=LocalizationService.T("Поддерживаемые документы|*.docx;*.html;*.htm;*.md;*.markdown;*.txt;*.rtf;*.pdf|Word (*.docx)|*.docx|HTML (*.html;*.htm)|*.html;*.htm|Markdown (*.md;*.markdown)|*.md;*.markdown|Текст (*.txt)|*.txt|RTF (*.rtf)|*.rtf|PDF (*.pdf)|*.pdf")};if(dialog.ShowDialog(this)!=true)return;
         try
         {
             var parent=TargetFolder();var title=UniqueTitle(parent,Path.GetFileNameWithoutExtension(dialog.FileName));var id=_vm.Database.Create(parent,false,title);var extension=Path.GetExtension(dialog.FileName).ToLowerInvariant();string html;string plain;
@@ -231,6 +240,7 @@ public partial class MainWindow : Window
         var deletedTitle=node.Title;
         foreach (var tab in _vm.Tabs.Where(t => t.DocumentId == node.Id).ToList()) _vm.Tabs.Remove(tab);
         _vm.Database.Delete(node.Id);
+        _libraryHistory.Push(new(LibraryActionKind.Delete,deletedId,node.ParentId,deletedTitle));
         _vm.ReloadTree();
         UpdateNavigationCounts();
         ShowSelectedTab();
@@ -268,6 +278,9 @@ public partial class MainWindow : Window
     {
         _tabDragStart=e.GetPosition(Tabs);
         _draggedTab=TabFromSource(e.OriginalSource as DependencyObject);
+        // Щелчок по уже выбранной вкладке не меняет выбор и не вызывает Tabs_SelectionChanged,
+        // поэтому возврат с главной страницы делается здесь.
+        if(_startPageVisible&&_draggedTab is not null&&ReferenceEquals(_draggedTab,_vm.SelectedTab))HideStartPage();
     }
     private void Tabs_PreviewMouseMove(object sender,MouseEventArgs e)
     {
@@ -296,9 +309,51 @@ public partial class MainWindow : Window
         if(source is null)return null;
         return ItemsControl.ContainerFromElement(Tabs,source) is ListBoxItem item?item.DataContext as DocumentTab:null;
     }
+    /// <summary>
+    /// Главная страница открывается поверх редактора и не закрывает документ: вкладка остаётся
+    /// выбранной, повторное нажатие кнопки «Главная» (или щелчок по вкладке) возвращает текст.
+    /// </summary>
+    private void Home_Click(object sender,RoutedEventArgs e)
+    {
+        if(SettingsHost.Visibility==Visibility.Visible)
+        {
+            if(_settingsView?.RequestClose()==false)return;
+            HideSettings();
+            if(_vm.SelectedTab is null)return;
+        }
+        if(_startPageVisible){HideStartPage();return;}
+        if(_vm.SelectedTab is null){LoadStartPage();return;}
+        ShowStartPage();
+    }
+    private void ShowStartPage()
+    {
+        _vm.SaveAll();
+        _startPageVisible=true;
+        ModernEditor.SetBrowserVisible(false);
+        ModernEditor.Visibility=Visibility.Collapsed;
+        Editor.Visibility=Visibility.Collapsed;
+        DocumentHeader.Visibility=Visibility.Collapsed;
+        EmptyHint.Visibility=Visibility.Visible;
+        LoadStartPage();
+        UpdateHomeButton();
+    }
+    private void HideStartPage()
+    {
+        if(!_startPageVisible)return;
+        _startPageVisible=false;
+        ShowSelectedTab(true);
+        ModernEditor.SetBrowserVisible(true);
+    }
+    private void UpdateHomeButton()
+    {
+        var active=_startPageVisible||_vm.SelectedTab is null;
+        HomeButton.SetResourceReference(ForegroundProperty,active?"Accent/Primary":"Text/Secondary");
+        HomeButton.ToolTip=_startPageVisible&&_vm.SelectedTab is not null?"Вернуться к документу":"Главная страница";
+    }
     private void ShowSelectedTab(bool focusEditor=false,string focusPosition="end")
     {
         _loading = true;
+        _startPageVisible = false;
         if (_vm.SelectedTab is null)
         {
             Editor.Visibility = Visibility.Collapsed;
@@ -339,6 +394,23 @@ public partial class MainWindow : Window
         _loading = false;
         UpdateNavigationCounts();
         UpdateDocumentStats();
+        UpdateHomeButton();
+        UpdatePropertiesVisibility();
+    }
+    /// <summary>Без открытого документа свойства и быстрые действия скрыты — показывать нечего.</summary>
+    private void UpdatePropertiesVisibility()
+    {
+        var hasDocument=_vm.SelectedTab is not null;
+        DocumentPropertiesGrid.Visibility=hasDocument?Visibility.Visible:Visibility.Collapsed;
+        QuickActionsPanel.Visibility=hasDocument?Visibility.Visible:Visibility.Collapsed;
+        PropertiesEmptyState.Visibility=hasDocument?Visibility.Collapsed:Visibility.Visible;
+        if(!hasDocument)
+        {
+            AttachmentsPanel.Visibility=Visibility.Collapsed;
+            PropertiesTabIndicator.Visibility=Visibility.Visible;
+            AttachmentsTabIndicator.Visibility=Visibility.Collapsed;
+            CloseAttachmentPreview();
+        }
     }
     private void LoadStartPage(){StartRecentList.ItemsSource=_vm.Database.LoadRecent(_settings.RecentFilesCount);StartStatisticsText.Text=$"Документов: {_vm.Database.CountDocuments()}   •   Избранных: {_vm.Database.CountFavorites()}   •   В корзине: {_vm.Database.CountTrash()}   •   Хранилище: {AppPaths.Data}";}
     private void UpdateDocumentHeader()
@@ -512,7 +584,7 @@ public partial class MainWindow : Window
         if(content.IsInitialLoad)return;
         ApplyEditorContent(tab,content,true);
     }
-    private void ModernEditor_Ready(object? sender,EventArgs e){LogService.Info("TipTap-редактор готов");_=ModernEditor.ExecuteAsync("setTheme",new{theme=_vm.DarkTheme?"dark":"light"});}
+    private void ModernEditor_Ready(object? sender,EventArgs e){LogService.Info("TipTap-редактор готов");_=ModernEditor.ExecuteAsync("setTheme",new{theme=_vm.DarkTheme?"dark":"light"});_=ModernEditor.ExecuteAsync("setLanguage",new{language=LocalizationService.IsEnglish?"en":"ru"});}
     private async void ModernEditor_FileDropped(object? sender,EditorFileData file)
     {
         if(file.DocumentId<=0||_vm.SelectedTab?.DocumentId!=file.DocumentId||string.IsNullOrWhiteSpace(file.DataUrl))return;
@@ -550,12 +622,21 @@ public partial class MainWindow : Window
         OutlineEmptyState.Visibility=isEmpty?Visibility.Visible:Visibility.Collapsed;
     }
     private void Heading_DoubleClick(object sender,MouseButtonEventArgs e){var heading=sender switch{TreeView tree when tree.SelectedItem is OutlineItem item=>item.Heading,ListBox list when list.SelectedItem is EditorHeading item=>item,_=>null};if(heading is not null)_=ModernEditor.ExecuteAsync("gotoHeading",new{pos=heading.Position});}
+    /// <summary>Выбранная глава сразу становится текущей: иначе подсвечивались и выбранная, и прежняя.</summary>
+    private void Structure_SelectedItemChanged(object sender,RoutedPropertyChangedEventArgs<object> e)
+    {
+        if(e.NewValue is not OutlineItem selected)return;
+        void Visit(IEnumerable<OutlineItem> items){foreach(var item in items){item.IsCurrent=ReferenceEquals(item,selected);Visit(item.Children);}}
+        Visit(_outlineRoots);
+    }
     private void StructureTab_Click(object sender,RoutedEventArgs e){StructureTab.IsChecked=true;HeadersTab.IsChecked=false;StructureTree.Visibility=Visibility.Visible;HeadersList.Visibility=Visibility.Collapsed;}
     private void HeadersTab_Click(object sender,RoutedEventArgs e){StructureTab.IsChecked=false;HeadersTab.IsChecked=true;StructureTree.Visibility=Visibility.Collapsed;HeadersList.Visibility=Visibility.Visible;}
     private void UpdateNavigationCounts() { AllDocumentsCountText.Text = _vm.Database.CountDocuments().ToString(); FavoritesCountText.Text = _vm.Database.CountFavorites().ToString(); RecentDocumentsCountText.Text = _vm.Database.CountRecent().ToString(); TrashCountText.Text = _vm.Database.CountTrash().ToString();UpdateNavigationEmptyState(); }
     private void UpdateNavigationEmptyState()
     {
         var isEmpty=_vm.Nodes.Count==0;
+        UpdateTemplatesButton();
+        UpdateNavigationSelection();
         NavigationEmptyState.Visibility=isEmpty?Visibility.Visible:Visibility.Collapsed;
         TrashHintText.Visibility=_navigationMode=="trash"&&!isEmpty?Visibility.Visible:Visibility.Collapsed;
         if(!isEmpty)return;
@@ -572,20 +653,100 @@ public partial class MainWindow : Window
     private void Favorites_Click(object sender, RoutedEventArgs e) { _navigationMode="favorites";_vm.ShowFavorites();UpdateNavigationEmptyState(); }
     private void Recent_Click(object sender, RoutedEventArgs e) { _navigationMode="recent";_vm.ShowRecent(_settingsService.Load().RecentFilesCount);UpdateNavigationEmptyState(); }
     private void Trash_Click(object sender, RoutedEventArgs e) { _navigationMode="trash";PurgeExpiredTrash();_vm.ShowTrash();UpdateNavigationCounts(); }
+    /// <summary>
+    /// Активный раздел библиотеки подсвечен, а заголовок списка называет именно его: раньше над
+    /// избранным и корзиной всё равно было написано «РАЗДЕЛЫ», и по кнопкам не было видно, где вы.
+    /// </summary>
+    private void UpdateNavigationSelection()
+    {
+        var buttons=new (string Mode,Button Button)[]{("all",AllDocumentsButton),("favorites",FavoritesButton),("recent",RecentButton),("trash",TrashButton)};
+        foreach(var (mode,button) in buttons)
+        {
+            var active=mode==_navigationMode;
+            if(active){button.SetResourceReference(BackgroundProperty,"Accent/Soft");button.SetResourceReference(BorderBrushProperty,"Accent/Primary");}
+            else{button.Background=Brushes.Transparent;button.BorderBrush=Brushes.Transparent;}
+            button.SetResourceReference(ForegroundProperty,active?"Text/Primary":"Text/Secondary");
+            button.FontWeight=active?FontWeights.SemiBold:FontWeights.Normal;
+        }
+        SectionsHeaderText.Text=_navigationMode switch
+        {
+            "favorites"=>"ИЗБРАННОЕ",
+            "recent"=>"НЕДАВНИЕ",
+            "trash"=>"КОРЗИНА",
+            "templates"=>"ШАБЛОНЫ",
+            _=>"РАЗДЕЛЫ"
+        };
+        // Создавать документ можно только в обычном списке: в корзине или недавних для новой
+        // записи нет места.
+        SectionAddButton.Visibility=_navigationMode=="all"?Visibility.Visible:Visibility.Collapsed;
+    }
     /// <summary>Корзина сама освобождается: элементы старше срока хранения удаляются окончательно.</summary>
     private void PurgeExpiredTrash()
     {
         try{if(_vm.Database.PurgeExpiredTrash(DatabaseService.TrashRetentionDays)>0)LogService.Info("Из корзины удалены элементы с истёкшим сроком хранения");}
         catch(Exception ex){LogService.Error("Не удалось очистить просроченные элементы корзины",ex);}
     }
-    /// <summary>Пункты корзины уместны только там, где применимы: восстановление и окончательное удаление — в корзине.</summary>
+    /// <summary>
+    /// Меню собирается под тот узел, по которому нажали. Неприменимое скрыто: у документа в
+    /// корзине копия, внутренняя ссылка, избранное и шаблон либо ничего не делали, либо
+    /// работали неправильно, а восстановление и окончательное удаление нужны только в корзине.
+    /// </summary>
     private void Tree_ContextMenuOpening(object sender,ContextMenuEventArgs e)
     {
-        var inTrash=_navigationMode=="trash";var hasNode=_vm.SelectedNode is not null;
+        // Меню, вызванное мышью мимо строки, действовало бы на выбранный ранее документ.
+        if((e.CursorLeft>=0||e.CursorTop>=0)&&_contextMenuNode is null){e.Handled=true;return;}
+        var node=_vm.SelectedNode;
+        var inTrash=_navigationMode=="trash";
+        var hasNode=node is not null;
+        var documentOutsideTrash=node is not null&&!node.IsFolder&&!inTrash;
+        OpenMenuItem.Visibility=hasNode?Visibility.Visible:Visibility.Collapsed;
+        DuplicateMenuItem.Visibility=documentOutsideTrash?Visibility.Visible:Visibility.Collapsed;
+        CopyLinkMenuItem.Visibility=documentOutsideTrash?Visibility.Visible:Visibility.Collapsed;
+        MakeTemplateMenuItem.Visibility=documentOutsideTrash?Visibility.Visible:Visibility.Collapsed;
+        FavoriteMenuItem.Visibility=documentOutsideTrash?Visibility.Visible:Visibility.Collapsed;
+        if(documentOutsideTrash)FavoriteMenuItem.Header=IsFavorite(node!.Id)?"Убрать из избранного":"Добавить в избранное";
+        RenameMenuItem.Visibility=hasNode&&!inTrash?Visibility.Visible:Visibility.Collapsed;
+        var clipboardAvailable=!inTrash;
+        ClipboardMenuSeparator.Visibility=clipboardAvailable?Visibility.Visible:Visibility.Collapsed;
+        CutMenuItem.Visibility=hasNode&&!inTrash?Visibility.Visible:Visibility.Collapsed;
+        CopyMenuItem.Visibility=documentOutsideTrash?Visibility.Visible:Visibility.Collapsed;
+        PasteMenuItem.Visibility=clipboardAvailable?Visibility.Visible:Visibility.Collapsed;
+        PasteMenuItem.IsEnabled=_libraryClipboard is not null;
+        UndoMenuItem.Visibility=clipboardAvailable?Visibility.Visible:Visibility.Collapsed;
+        UndoMenuItem.IsEnabled=_libraryHistory.Count>0;
+        CollapseMenuSeparator.Visibility=hasNode&&!inTrash?Visibility.Visible:Visibility.Collapsed;
         RestoreMenuItem.Visibility=inTrash&&hasNode?Visibility.Visible:Visibility.Collapsed;
         DeletePermanentlyMenuItem.Visibility=inTrash&&hasNode?Visibility.Visible:Visibility.Collapsed;
         MoveToTrashMenuItem.Visibility=!inTrash&&hasNode?Visibility.Visible:Visibility.Collapsed;
         TrashMenuSeparator.Visibility=hasNode?Visibility.Visible:Visibility.Collapsed;
+    }
+    private bool IsFavorite(long id)
+    {
+        try{return _vm.Database.LoadFavorites().Any(item=>item.Id==id);}
+        catch(Exception ex){LogService.Error("Не удалось прочитать список избранного",ex);return false;}
+    }
+    /// <summary>
+    /// Правая кнопка выбирает строку под курсором: без этого «Переместить в корзину» и
+    /// «Переименовать» применялись к документу, выбранному до вызова меню.
+    /// </summary>
+    /// <summary>
+    /// Документ в списке открывается одним щелчком: двойной оставлен, но уже не обязателен.
+    /// Перетаскивание при этом не открывает документ — учитывается смещение курсора.
+    /// </summary>
+    private void Tree_PreviewMouseLeftButtonUp(object sender,MouseButtonEventArgs e)
+    {
+        if((ItemsControl.ContainerFromElement(Tree,e.OriginalSource as DependencyObject) as TreeViewItem)?.DataContext is not NodeItem node)return;
+        if(node.IsFolder||(e.GetPosition(Tree)-_dragStart).Length>=8)return;
+        _vm.Open(node);
+        ShowSelectedTab();
+    }
+    private void Tree_PreviewMouseRightButtonDown(object sender,MouseButtonEventArgs e)
+    {
+        var item=ItemsControl.ContainerFromElement(Tree,e.OriginalSource as DependencyObject) as TreeViewItem;
+        _contextMenuNode=item?.DataContext as NodeItem;
+        if(item is null)return;
+        item.IsSelected=true;
+        item.Focus();
     }
     private static void RunTool(string file,string? arguments=null)
     {
@@ -595,8 +756,7 @@ public partial class MainWindow : Window
     private void QuickSnipping_Click(object sender,RoutedEventArgs e)=>RunTool("ms-screenclip:");
     private void QuickCalculator_Click(object sender,RoutedEventArgs e)=>RunTool("calc.exe");
     private void QuickAssets_Click(object sender,RoutedEventArgs e)=>RunTool("explorer.exe",$"\"{AppPaths.Assets}\"");
-    private void QuickDataFolder_Click(object sender,RoutedEventArgs e)=>RunTool("explorer.exe",$"\"{AppPaths.Data}\"");
-    private void FavoriteNode_Click(object sender, RoutedEventArgs e) { if (_vm.SelectedNode is null || _vm.SelectedNode.IsFolder) return; _vm.Database.ToggleFavorite(_vm.SelectedNode.Id); UpdateNavigationCounts(); }
+    private void FavoriteNode_Click(object sender, RoutedEventArgs e) { if (_vm.SelectedNode is null || _vm.SelectedNode.IsFolder) return; _vm.Database.ToggleFavorite(_vm.SelectedNode.Id); UpdateNavigationCounts(); if(_navigationMode=="favorites")_vm.ShowFavorites(); if(_vm.SelectedTab is not null)UpdateDocumentHeader(); }
     private void CopyDocumentLink_Click(object sender,RoutedEventArgs e){if(_vm.SelectedNode is null||_vm.SelectedNode.IsFolder)return;Clipboard.SetText("masterdoc://document/"+_vm.Database.GetDocumentGuid(_vm.SelectedNode.Id));}
     private void RestoreNode_Click(object sender, RoutedEventArgs e) { if (_vm.SelectedNode is null) return; _vm.Database.Restore(_vm.SelectedNode.Id); _vm.ShowTrash(); UpdateNavigationCounts(); }
     private void DuplicateSelectedNode_Click(object sender,RoutedEventArgs e){if(_vm.SelectedNode is null||_vm.SelectedNode.IsFolder)return;var id=_vm.Database.Duplicate(_vm.SelectedNode.Id);_vm.ReloadTree();UpdateNavigationCounts();var node=FindNode(_vm.Nodes,id);if(node is not null){_vm.Open(node);ShowSelectedTab();}}
@@ -607,7 +767,18 @@ public partial class MainWindow : Window
     private void Tree_ExpansionChanged(object sender,RoutedEventArgs e){Dispatcher.BeginInvoke(SaveExpandedNodes,System.Windows.Threading.DispatcherPriority.Background);}
     private void SaveExpandedNodes(){var ids=new List<long>();void Visit(NodeItem node){if(node.IsExpanded)ids.Add(node.Id);foreach(var child in node.Children)Visit(child);}foreach(var node in _vm.Nodes)Visit(node);_vm.Database.SetSetting("ExpandedNodeIds",string.Join(',',ids));}
     private void MakeTemplate_Click(object sender,RoutedEventArgs e){if(_vm.SelectedNode is null||_vm.SelectedNode.IsFolder){MessageBox.Show(this,"Шаблоном может быть только документ.");return;}_vm.Save(_vm.Tabs.FirstOrDefault(x=>x.DocumentId==_vm.SelectedNode.Id));_vm.Database.SetTemplate(_vm.SelectedNode.Id,true);ToastService.Show("Шаблон создан","Документ доступен в списке шаблонов.",ToastKind.Success);}
-    private void Templates_Click(object sender,RoutedEventArgs e){_navigationMode="templates";_vm.ShowTemplates();UpdateNavigationEmptyState();}
+    /// <summary>Кнопка работает как переключатель: повторное нажатие возвращает список всех документов.</summary>
+    private void Templates_Click(object sender,RoutedEventArgs e)
+    {
+        if(_navigationMode=="templates"){AllDocuments_Click(sender,e);return;}
+        _navigationMode="templates";_vm.ShowTemplates();UpdateNavigationEmptyState();
+    }
+    private void UpdateTemplatesButton()
+    {
+        var active=_navigationMode=="templates";
+        TemplatesButton.ToolTip=active?"Закрыть шаблоны документов":"Открыть шаблоны документов";
+        TemplatesButton.SetResourceReference(ForegroundProperty,active?"Accent/Primary":"Text/Primary");
+    }
     private void Applications_Click(object sender,RoutedEventArgs e)=>new ApplicationsWindow{Owner=this}.ShowDialog();
     private void StorageHealth_Click(object sender,RoutedEventArgs e){try{var result=_vm.Database.CheckIntegrity();if(result.Equals("ok",StringComparison.OrdinalIgnoreCase))ToastService.Show("Хранилище исправно","Проверка целостности завершена.",ToastKind.Success);else MessageBox.Show(this,"Результат проверки: "+result,"Проверка хранилища",MessageBoxButton.OK,MessageBoxImage.Warning);}catch(Exception ex){MessageBox.Show(this,"Не удалось проверить хранилище: "+ex.Message,"Проверка",MessageBoxButton.OK,MessageBoxImage.Error);}}
     private void ThemeQuickToggle_Click(object sender,RoutedEventArgs e)
@@ -644,23 +815,204 @@ public partial class MainWindow : Window
         AttachmentsHeaderText.Text=$"Вложения ({_attachments.Count})";
         AttachmentsEmptyState.Visibility=_attachments.Count==0?Visibility.Visible:Visibility.Collapsed;
     }
-    private void PropertiesTab_Click(object sender,RoutedEventArgs e){AttachmentsPanel.Visibility=Visibility.Collapsed;PropertiesTabIndicator.Visibility=Visibility.Visible;AttachmentsTabIndicator.Visibility=Visibility.Collapsed;}
-    private void AttachmentsTab_Click(object sender,RoutedEventArgs e){AttachmentsPanel.Visibility=Visibility.Visible;PropertiesTabIndicator.Visibility=Visibility.Collapsed;AttachmentsTabIndicator.Visibility=Visibility.Visible;LoadDocumentProperties();}
+    private void PropertiesTab_Click(object sender,RoutedEventArgs e){if(_vm.SelectedTab is null)return;AttachmentsPanel.Visibility=Visibility.Collapsed;PropertiesTabIndicator.Visibility=Visibility.Visible;AttachmentsTabIndicator.Visibility=Visibility.Collapsed;}
+    private void AttachmentsTab_Click(object sender,RoutedEventArgs e){if(_vm.SelectedTab is null){ToastService.Show("Вложения","Сначала откройте документ.",ToastKind.Information);return;}AttachmentsPanel.Visibility=Visibility.Visible;PropertiesTabIndicator.Visibility=Visibility.Collapsed;AttachmentsTabIndicator.Visibility=Visibility.Visible;LoadDocumentProperties();}
     private void AddAttachment_Click(object sender,RoutedEventArgs e)
     {
-        if(_vm.SelectedTab is null){MessageBox.Show(this,"Сначала откройте документ.","Вложения");return;}var dialog=new OpenFileDialog{Title="Добавить вложение",Filter="Все файлы|*.*",Multiselect=true};if(dialog.ShowDialog(this)!=true)return;
-        try{foreach(var path in dialog.FileNames){var asset=StoreAsset(path);if(_vm.Database.GetAttachments(_vm.SelectedTab.DocumentId).Any(x=>x.Sha256.Equals(asset.Hash,StringComparison.OrdinalIgnoreCase)))continue;_vm.Database.RegisterAttachment(_vm.SelectedTab.DocumentId,Path.GetFileName(path),asset.StoredName,GuessMimeType(path),asset.Size,asset.Hash);}LoadDocumentProperties();}catch(Exception ex){LogService.Error("Не удалось добавить вложение",ex);MessageBox.Show(this,"Не удалось добавить вложение: "+ex.Message,"Вложения",MessageBoxButton.OK,MessageBoxImage.Error);}
+        if(_vm.SelectedTab is null){MessageBox.Show(this,"Сначала откройте документ.","Вложения");return;}var dialog=new OpenFileDialog{Title=LocalizationService.T("Добавить вложение"),Filter=LocalizationService.T("Все файлы|*.*"),Multiselect=true};if(dialog.ShowDialog(this)!=true)return;
+        AttachFiles(dialog.FileNames);
     }
     /// <summary>
-    /// Выбор вложения переносится в текст: изображение выделяется в документе, и панель свойств
-    /// начинает править именно его, а не то, что было выбрано мышью до этого.
+    /// Щелчок только выделяет вложение — им управляют кнопки под списком. Переход к файлу
+    /// делается двойным щелчком: одиночный щелчок раньше сразу уводил из списка.
     /// </summary>
     private void AttachmentList_SelectionChanged(object sender,SelectionChangedEventArgs e)
     {
-        var isImage=AttachmentList.SelectedItem is AttachmentInfo item&&item.MimeType.StartsWith("image/",StringComparison.OrdinalIgnoreCase);
+        var item=AttachmentList.SelectedItem as AttachmentInfo;
+        var selected=item is not null;
+        var isImage=item is not null&&IsImage(item.FileName,item.MimeType);
         ShowAttachmentInDocumentButton.IsEnabled=isImage;
-        if(isImage&&AttachmentList.SelectedItem is AttachmentInfo selected)SelectAttachmentInDocument(selected);
+        PreviewAttachmentButton.IsEnabled=item is not null&&PreviewKindOf(item.FileName)!=AttachmentPreviewKind.None;
+        OpenAttachmentButton.IsEnabled=selected;
+        ShowAttachmentInFolderButton.IsEnabled=selected;
+        SaveAttachmentButton.IsEnabled=selected;
+        RemoveAttachmentButton.IsEnabled=selected;
     }
+    private void AttachmentList_DoubleClick(object sender,MouseButtonEventArgs e)
+    {
+        if(AttachmentList.SelectedItem is not AttachmentInfo item)return;
+        if(PreviewKindOf(item.FileName)!=AttachmentPreviewKind.None)ShowAttachmentPreview(item);
+        else OpenAttachment_Click(sender,new RoutedEventArgs());
+    }
+    private static bool IsImage(string fileName,string mime)=>
+        mime.StartsWith("image/",StringComparison.OrdinalIgnoreCase)||
+        Path.GetExtension(fileName).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".gif" or ".bmp" or ".webp" or ".tif" or ".tiff";
+    /// <summary>
+    /// Перетаскивание файла на панель вложений: поле тускнеет и показывает значок файла с плюсом,
+    /// чтобы было видно, куда файл попадёт. В текст документа принимаются только изображения.
+    /// </summary>
+    private void Attachments_DragOver(object sender,DragEventArgs e)
+    {
+        var accepted=_vm.SelectedTab is not null&&e.Data.GetDataPresent(DataFormats.FileDrop);
+        e.Effects=accepted?DragDropEffects.Copy:DragDropEffects.None;
+        AttachmentsDropHintText.Text=_vm.SelectedTab is null
+            ?"Сначала откройте документ"
+            :"Отпустите файл — он станет вложением документа";
+        AttachmentsDropHint.Visibility=e.Data.GetDataPresent(DataFormats.FileDrop)?Visibility.Visible:Visibility.Collapsed;
+        e.Handled=true;
+    }
+    private void Attachments_DragLeave(object sender,DragEventArgs e)
+    {
+        // Переход между вложенными элементами панели тоже поднимает DragLeave: подсказка гаснет
+        // только когда курсор действительно ушёл за её границы.
+        var point=e.GetPosition(AttachmentsPanel);
+        if(point.X<0||point.Y<0||point.X>AttachmentsPanel.ActualWidth||point.Y>AttachmentsPanel.ActualHeight)
+            AttachmentsDropHint.Visibility=Visibility.Collapsed;
+    }
+    private void Attachments_Drop(object sender,DragEventArgs e)
+    {
+        AttachmentsDropHint.Visibility=Visibility.Collapsed;
+        e.Handled=true;
+        if(_vm.SelectedTab is null){ToastService.Show("Вложения","Сначала откройте документ.",ToastKind.Information);return;}
+        if(e.Data.GetData(DataFormats.FileDrop) is not string[] paths)return;
+        AttachFiles(paths.Where(File.Exists));
+    }
+    private void AttachFiles(IEnumerable<string> paths)
+    {
+        if(_vm.SelectedTab is null)return;
+        var documentId=_vm.SelectedTab.DocumentId;
+        var added=0;
+        var rejected=new List<string>();
+        try
+        {
+            foreach(var path in paths)
+            {
+                // Во вложения идут только файлы, которые можно прочитать: программы, образы и
+                // значки в документации бесполезны, их предпросмотр всё равно невозможен.
+                if(BlockedAttachmentExtensions.Contains(Path.GetExtension(path))){rejected.Add(Path.GetFileName(path));continue;}
+                var asset=StoreAsset(path);
+                if(_vm.Database.GetAttachments(documentId).Any(x=>x.Sha256.Equals(asset.Hash,StringComparison.OrdinalIgnoreCase)))continue;
+                _vm.Database.RegisterAttachment(documentId,Path.GetFileName(path),asset.StoredName,GuessMimeType(path),asset.Size,asset.Hash);
+                added++;
+            }
+            LoadDocumentProperties();
+            if(added>0)ToastService.Show("Вложение добавлено",$"Файлов добавлено: {added}. Они привязаны к документу «{_vm.SelectedTab.Title}».",ToastKind.Success);
+            if(rejected.Count>0)ToastService.Show("Такие файлы во вложения не добавляются",string.Join(", ",rejected.Take(3))+(rejected.Count>3?$" и ещё {rejected.Count-3}":"")+" — программы, образы и значки прочитать нельзя.",ToastKind.Warning,TimeSpan.FromSeconds(8));
+        }
+        catch(Exception ex){LogService.Error("Не удалось добавить вложение",ex);MessageBox.Show(this,"Не удалось добавить вложение: "+ex.Message,"Вложения",MessageBoxButton.OK,MessageBoxImage.Error);}
+    }
+    private enum AttachmentPreviewKind{None,Image,Text,Pdf,Word}
+    /// <summary>Расширения, которые заведомо нечего показывать и незачем хранить в документации.</summary>
+    private static readonly HashSet<string> BlockedAttachmentExtensions=new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".exe",".dll",".msi",".com",".bat",".cmd",".ps1",".vbs",".scr",".sys",".drv",".cpl",".ocx",
+        ".ico",".cur",".lnk",".iso",".img",".vhd",".vhdx",".bin",".obj",".o",".lib",".pdb",".pyc",".class",".apk",".jar",".msix",".appx"
+    };
+    /// <summary>Текстовые форматы, которые показываются как есть: разметка, код и настройки.</summary>
+    private static readonly HashSet<string> TextAttachmentExtensions=new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".txt",".md",".markdown",".log",".csv",".tsv",".json",".xml",".yaml",".yml",".ini",".cfg",".conf",".toml",".env",
+        ".html",".htm",".css",".js",".ts",".jsx",".tsx",".cs",".java",".py",".rb",".go",".rs",".php",".sql",".sh",".bash",
+        ".c",".h",".cpp",".hpp",".kt",".swift",".gradle",".props",".targets",".csproj",".sln",".gitignore",".editorconfig",".srt",".vtt"
+    };
+    private static AttachmentPreviewKind PreviewKindOf(string fileName)
+    {
+        var extension=Path.GetExtension(fileName).ToLowerInvariant();
+        if(IsImage(fileName,""))return AttachmentPreviewKind.Image;
+        if(extension==".pdf")return AttachmentPreviewKind.Pdf;
+        if(extension is ".docx")return AttachmentPreviewKind.Word;
+        return TextAttachmentExtensions.Contains(extension)?AttachmentPreviewKind.Text:AttachmentPreviewKind.None;
+    }
+    private void PreviewAttachment_Click(object sender,RoutedEventArgs e)
+    {
+        if(AttachmentList.SelectedItem is AttachmentInfo item)ShowAttachmentPreview(item);
+    }
+    /// <summary>
+    /// Показывает содержимое вложения поверх текста документа. Встроенный редактор рисуется
+    /// собственным окном поверх элементов WPF, поэтому на время просмотра он прячется — иначе
+    /// панель просмотра оказалась бы под ним.
+    /// </summary>
+    private void ShowAttachmentPreview(AttachmentInfo item)
+    {
+        var kind=PreviewKindOf(item.FileName);
+        AttachmentPreviewTitle.Text=item.FileName;
+        AttachmentPreviewImageScroll.Visibility=Visibility.Collapsed;
+        AttachmentPreviewText.Visibility=Visibility.Collapsed;
+        AttachmentPreviewUnavailable.Visibility=Visibility.Collapsed;
+        AttachmentPreviewImage.Source=null;
+        try
+        {
+            _vm.Database.MaterializeAsset(item.StoredName);
+            var path=Path.Combine(AppPaths.Assets,item.StoredName);
+            if(!File.Exists(path))
+            {
+                AttachmentPreviewMessage.Text="Файл вложения не найден в локальном хранилище.";
+                AttachmentPreviewUnavailable.Visibility=Visibility.Visible;
+            }
+            else switch(kind)
+            {
+                case AttachmentPreviewKind.Image:
+                {
+                    var bitmap=new BitmapImage();bitmap.BeginInit();bitmap.UriSource=new Uri(path);bitmap.CacheOption=BitmapCacheOption.OnLoad;bitmap.EndInit();bitmap.Freeze();
+                    AttachmentPreviewImage.Source=bitmap;
+                    AttachmentPreviewImage.Stretch=Stretch.Uniform;
+                    AttachmentPreviewImage.MaxWidth=bitmap.PixelWidth;
+                    AttachmentPreviewImageScroll.Visibility=Visibility.Visible;
+                    break;
+                }
+                case AttachmentPreviewKind.Text:
+                    AttachmentPreviewText.Text=ReadTextPreview(path);
+                    AttachmentPreviewText.Visibility=Visibility.Visible;
+                    break;
+                case AttachmentPreviewKind.Pdf:
+                {
+                    var result=PdfImportService.Extract(path);
+                    AttachmentPreviewText.Text=string.IsNullOrWhiteSpace(result.PlainText)
+                        ?"В этом PDF нет текстового слоя — предпросмотр показать нечего."
+                        :result.PlainText;
+                    AttachmentPreviewText.Visibility=Visibility.Visible;
+                    break;
+                }
+                case AttachmentPreviewKind.Word:
+                    AttachmentPreviewText.Text=ImportDocx(path).Plain;
+                    AttachmentPreviewText.Visibility=Visibility.Visible;
+                    break;
+                default:
+                    AttachmentPreviewMessage.Text="Этот формат нельзя показать внутри приложения.";
+                    AttachmentPreviewUnavailable.Visibility=Visibility.Visible;
+                    break;
+            }
+        }
+        catch(Exception ex)
+        {
+            LogService.Error("Не удалось показать предпросмотр вложения",ex);
+            AttachmentPreviewMessage.Text="Не удалось прочитать файл: "+ex.Message;
+            AttachmentPreviewUnavailable.Visibility=Visibility.Visible;
+        }
+        AttachmentPreviewOverlay.Visibility=Visibility.Visible;
+        ModernEditor.SetBrowserVisible(false);
+    }
+    /// <summary>Текст показывается с ограничением: большой журнал незачем целиком грузить в окно.</summary>
+    private static string ReadTextPreview(string path)
+    {
+        const int limit=400_000;
+        var info=new FileInfo(path);
+        var text=File.ReadAllText(path);
+        return info.Length>limit?text[..Math.Min(text.Length,limit)]+"\n\n…файл показан не полностью." : text;
+    }
+    private void CloseAttachmentPreview_Click(object sender,RoutedEventArgs e)=>CloseAttachmentPreview();
+    private void CloseAttachmentPreview()
+    {
+        if(AttachmentPreviewOverlay.Visibility!=Visibility.Visible)return;
+        AttachmentPreviewOverlay.Visibility=Visibility.Collapsed;
+        AttachmentPreviewImage.Source=null;
+        AttachmentPreviewText.Clear();
+        if(SettingsHost.Visibility!=Visibility.Visible&&OperationOverlay.Visibility!=Visibility.Visible)ModernEditor.SetBrowserVisible(true);
+    }
+    private void ModernEditor_UnsupportedFilesDropped(object? sender,int count)=>
+        ToastService.Show("В текст можно вставить только изображение",
+            count==1?"Остальные файлы добавляются на вкладке «Вложения» — перетащите файл туда.":"Такие файлы добавляются на вкладке «Вложения» — перетащите их туда.",
+            ToastKind.Information,TimeSpan.FromSeconds(7),"Открыть вложения",()=>Dispatcher.BeginInvoke(new Action(()=>AttachmentsTab_Click(this,new RoutedEventArgs()))));
     private void ShowAttachmentInDocument_Click(object sender,RoutedEventArgs e)
     {
         if(AttachmentList.SelectedItem is not AttachmentInfo item){ToastService.Show("Вложения","Выберите вложение в списке.",ToastKind.Information);return;}
@@ -695,14 +1047,52 @@ public partial class MainWindow : Window
     private void ModernEditor_InitializationFailed(object? sender,string error)
     {
         LogService.Error("Не удалось запустить редактор WebView2: "+error);
-        ToastService.Show("Редактор не запустился","Подробности записаны в Data\\Logs. Нажмите «Повторить запуск редактора» на месте редактора или перезапустите приложение.",ToastKind.Error,TimeSpan.FromSeconds(12));
+        ToastService.Show("Редактор не запустился","Подробности записаны в папку Logs. Нажмите «Повторить запуск редактора» на месте редактора или перезапустите приложение.",ToastKind.Error,TimeSpan.FromSeconds(12));
     }
     private void ModernEditor_ImageMissing(object? sender,string source)=>
         ToastService.Show("Вложения не видно в тексте","Файл прикреплён к документу, но не вставлен в содержимое.",ToastKind.Information);
     private void OpenAttachment_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;_vm.Database.MaterializeAsset(item.StoredName);var path=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(path)){MessageBox.Show(this,"Файл вложения не найден в локальном хранилище.","Вложения",MessageBoxButton.OK,MessageBoxImage.Warning);return;}Process.Start(new ProcessStartInfo(path){UseShellExecute=true});}
     private void ShowAttachmentInFolder_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;_vm.Database.MaterializeAsset(item.StoredName);var path=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(path)){MessageBox.Show(this,"Файл вложения не найден. Проверьте целостность хранилища или восстановите резервную копию.","Вложения",MessageBoxButton.OK,MessageBoxImage.Warning);return;}Process.Start(new ProcessStartInfo("explorer.exe",$"/select,\"{path}\""){UseShellExecute=true});}
-    private void SaveAttachment_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;_vm.Database.MaterializeAsset(item.StoredName);var source=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(source)){MessageBox.Show(this,"Файл вложения не найден.","Вложения");return;}var dialog=new SaveFileDialog{Title="Сохранить вложение",FileName=item.FileName,Filter="Все файлы|*.*"};if(dialog.ShowDialog(this)==true)File.Copy(source,dialog.FileName,true);}
-    private void RemoveAttachment_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;if(MessageBox.Show(this,$"Удалить связь с файлом «{item.FileName}»?\nСам файл будет удалён только если больше нигде не используется.","Удаление вложения",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes)return;try{var removed=_vm.Database.RemoveAttachment(item.Id);if(removed.IsUnused){var path=Path.Combine(AppPaths.Assets,removed.StoredName);if(File.Exists(path))File.Delete(path);}LoadDocumentProperties();}catch(Exception ex){MessageBox.Show(this,"Не удалось удалить вложение: "+ex.Message,"Вложения",MessageBoxButton.OK,MessageBoxImage.Error);}}
+    private void SaveAttachment_Click(object sender,RoutedEventArgs e){if(AttachmentList.SelectedItem is not AttachmentInfo item)return;_vm.Database.MaterializeAsset(item.StoredName);var source=Path.Combine(AppPaths.Assets,item.StoredName);if(!File.Exists(source)){MessageBox.Show(this,"Файл вложения не найден.","Вложения");return;}var dialog=new SaveFileDialog{Title=LocalizationService.T("Сохранить вложение"),FileName=item.FileName,Filter=LocalizationService.T("Все файлы|*.*")};if(dialog.ShowDialog(this)==true)File.Copy(source,dialog.FileName,true);}
+    /// <summary>
+    /// Удаление вложения сначала убирает файл из текста документа и только потом снимает связь:
+    /// иначе документ продолжал ссылаться на файл, тот считался используемым и оставался на диске,
+    /// а в тексте висела картинка без вложения.
+    /// </summary>
+    private async void RemoveAttachment_Click(object sender,RoutedEventArgs e)
+    {
+        if(AttachmentList.SelectedItem is not AttachmentInfo item)return;
+        if(MessageBox.Show(this,$"Удалить вложение «{item.FileName}»?\nОно будет убрано из текста документа, а сам файл — удалён, если больше нигде не используется.","Удаление вложения",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes)return;
+        try
+        {
+            var tab=_vm.SelectedTab;
+            if(tab is not null&&tab.DocumentId==item.DocumentId&&ModernEditor.Visibility==Visibility.Visible)
+            {
+                await ModernEditor.ExecuteAsync("removeImagesBySrc",new{src=item.StoredName});
+                // Снимок содержимого нужен до снятия связи: пересчёт «используется ли файл»
+                // читает сохранённый текст документа.
+                try
+                {
+                    using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                    var snapshot=await ModernEditor.CaptureContentAsync(timeout.Token);
+                    var target=_vm.Tabs.FirstOrDefault(x=>x.DocumentId==snapshot.DocumentId);
+                    if(target is not null)ApplyEditorContent(target,snapshot,false);
+                }
+                catch(Exception ex){LogService.Error("Не удалось получить снимок редактора при удалении вложения",ex);}
+                _vm.Save(tab);
+            }
+            var removed=_vm.Database.RemoveAttachment(item.Id,ignoreVersions:true);
+            if(removed.IsUnused)
+            {
+                var path=Path.Combine(AppPaths.Assets,removed.StoredName);
+                if(File.Exists(path))File.Delete(path);
+                _vm.Database.CleanupUnusedAssets();
+            }
+            LoadDocumentProperties();
+            ToastService.Show("Вложение удалено",removed.IsUnused?item.FileName+" — файл удалён из хранилища.":item.FileName+" — файл используется в других документах и оставлен в хранилище.",ToastKind.Success);
+        }
+        catch(Exception ex){LogService.Error("Не удалось удалить вложение",ex);MessageBox.Show(this,"Не удалось удалить вложение: "+ex.Message,"Вложения",MessageBoxButton.OK,MessageBoxImage.Error);}
+    }
     private static string GuessMimeType(string path)=>Path.GetExtension(path).ToLowerInvariant() switch{".png"=>"image/png",".jpg" or ".jpeg"=>"image/jpeg",".gif"=>"image/gif",".svg"=>"image/svg+xml",".pdf"=>"application/pdf",".docx"=>"application/vnd.openxmlformats-officedocument.wordprocessingml.document",".xlsx"=>"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",".zip"=>"application/zip",".json"=>"application/json",".html" or ".htm"=>"text/html",".md"=>"text/markdown",".txt"=>"text/plain",_=>"application/octet-stream"};
     private void Status_Changed(object sender,SelectionChangedEventArgs e){if(_loading||_vm?.SelectedTab is null||StatusBox.SelectedItem is null)return;var value=StatusBox.SelectedItem is ComboBoxItem item?item.Content?.ToString():StatusBox.SelectedItem.ToString();if(!string.IsNullOrWhiteSpace(value)){_vm.Database.SetStatus(_vm.SelectedTab.DocumentId,value);UpdateStatusIndicator(value);}}
     private void UpdateStatusIndicator(string? status)
@@ -726,7 +1116,19 @@ public partial class MainWindow : Window
     {
         if(_vm.SelectedTab is null){ToastService.Show("Теги","Сначала откройте документ.",ToastKind.Information);return;}
         TagsPopup.IsOpen=!TagsPopup.IsOpen;
-        if(TagsPopup.IsOpen){TagInputBox.Text="";Dispatcher.BeginInvoke(new Action(()=>TagInputBox.Focus()));}
+        if(!TagsPopup.IsOpen)return;
+        AlignTagsPopup();
+        TagInputBox.Text="";
+        Dispatcher.BeginInvoke(new Action(()=>TagInputBox.Focus()));
+    }
+    /// <summary>
+    /// Окно тегов выравнивается по правому краю строки тегов и больше не двигается: раньше оно
+    /// висело на кнопке «＋», а та смещалась после каждого добавленного чипа.
+    /// </summary>
+    private void AlignTagsPopup()
+    {
+        const double popupWidth=250;
+        TagsPopup.HorizontalOffset=TagsBorder.ActualWidth-popupWidth;
     }
     private void AddTag_Click(object sender,RoutedEventArgs e)=>AddTagFromInput();
     private void TagInput_KeyDown(object sender,KeyEventArgs e){if(e.Key!=Key.Enter)return;AddTagFromInput();e.Handled=true;}
@@ -800,8 +1202,13 @@ public partial class MainWindow : Window
     private void FontFamily_Changed(object sender, SelectionChangedEventArgs e) { if(_updatingToolbarState)return;if(FontFamilyBox.SelectedItem is not FontFamily f)return;if(ModernEditor.Visibility==Visibility.Visible){_=ModernEditor.ExecuteAsync("fontFamily",new{family=f.Source});return;}if(Editor?.Selection is not null)Editor.Selection.ApplyPropertyValue(TextElement.FontFamilyProperty,f); }
     private void FontSize_Changed(object sender, SelectionChangedEventArgs e) { if(_updatingToolbarState)return;if(FontSizeBox.SelectedItem is double d)ApplyFontSize(d); }
     private void FontSize_LostFocus(object sender, KeyboardFocusChangedEventArgs e) { if(_updatingToolbarState)return;if(double.TryParse(FontSizeBox.Text,out var d)&&d is>=6 and<=200)ApplyFontSize(d); }
-    private void ApplyFontSize(double size){if(ModernEditor.Visibility==Visibility.Visible){_=ModernEditor.ExecuteAsync("fontSize",new{size});return;}Editor.Selection.ApplyPropertyValue(TextElement.FontSizeProperty,size);}
-    private async void Heading_Changed(object sender, SelectionChangedEventArgs e) { if(_resettingHeadingSelector)return;if(ModernEditor is not null&&ModernEditor.Visibility==Visibility.Visible&&HeadingBox.SelectedItem is ComboBoxItem modern&&int.TryParse(modern.Tag?.ToString(),out var level)){await ModernEditor.ExecuteAsync(level==0?"paragraph":"heading",level==0?null:new{level});if(level>0){_resettingHeadingSelector=true;HeadingBox.SelectedIndex=0;_resettingHeadingSelector=false;}return;}if (Editor is null || HeadingBox.SelectedItem is not ComboBoxItem item || !double.TryParse(item.Tag?.ToString(), out var size)) return; ApplyFontSize(size); Editor.Selection.ApplyPropertyValue(TextElement.FontWeightProperty, size > 13 ? FontWeights.Bold : FontWeights.Normal); }
+    private void ApplyFontSize(double size){if(ModernEditor.Visibility==Visibility.Visible){_=ModernEditor.ExecuteAsync("fontSize",new{size});return;}Editor.Selection.ApplyPropertyValue(TextElement.FontSizeProperty,size.ToString(System.Globalization.CultureInfo.InvariantCulture));}
+    /// <summary>
+    /// Список показывает стиль текущего абзаца и не сбрасывается сам: раньше после применения
+    /// заголовка в списке снова стоял «Обычный», поэтому выбрать его повторно было нельзя —
+    /// событие не возникало, и вернуть обычный текст удавалось только очисткой форматирования.
+    /// </summary>
+    private async void Heading_Changed(object sender, SelectionChangedEventArgs e) { if(_updatingToolbarState)return;if(ModernEditor is not null&&ModernEditor.Visibility==Visibility.Visible&&HeadingBox.SelectedItem is ComboBoxItem modern&&int.TryParse(modern.Tag?.ToString(),out var level)){await ModernEditor.ExecuteAsync(level==0?"paragraph":"heading",level==0?null:new{level});return;}if (Editor is null || HeadingBox.SelectedItem is not ComboBoxItem item || !double.TryParse(item.Tag?.ToString(), out var size)) return; ApplyFontSize(size); Editor.Selection.ApplyPropertyValue(TextElement.FontWeightProperty, size > 13 ? FontWeights.Bold : FontWeights.Normal); }
     private async void ModernCommand_Click(object sender,RoutedEventArgs e){if(sender is FrameworkElement{Tag:string command})await ModernEditor.ExecuteAsync(command);}
     private async void Callout_Click(object sender,RoutedEventArgs e){if(sender is not FrameworkElement{Tag:string value})return;var parts=value.Split('|',2);await ModernEditor.ExecuteAsync("callout",new{kind=parts[0],label=parts.Length>1?parts[1]:"Примечание"});BlocksToggle.IsChecked=false;}
     private async void Collapsible_Click(object sender,RoutedEventArgs e){var prompt=new TextPrompt("Заголовок сворачиваемой секции","Подробнее"){Owner=this};if(prompt.ShowDialog()!=true)return;await ModernEditor.ExecuteAsync("collapsible",new{title=prompt.Value});BlocksToggle.IsChecked=false;}
@@ -847,6 +1254,8 @@ public partial class MainWindow : Window
             ItalicToggle.IsChecked=state.TryGetProperty("italic",out var italic)&&italic.GetBoolean();
             UnderlineToggle.IsChecked=state.TryGetProperty("underline",out var underline)&&underline.GetBoolean();
             StrikeToggle.IsChecked=state.TryGetProperty("strike",out var strike)&&strike.GetBoolean();
+            if(state.TryGetProperty("heading",out var heading)&&heading.TryGetInt32(out var headingLevel))
+                HeadingBox.SelectedIndex=headingLevel is >=0 and <=6?headingLevel:0;
             if(state.TryGetProperty("fontFamily",out var family)&&!string.IsNullOrWhiteSpace(family.GetString()))
                 FontFamilyBox.SelectedItem=Fonts.SystemFontFamilies.FirstOrDefault(x=>x.Source.Equals(family.GetString(),StringComparison.OrdinalIgnoreCase));
             if(state.TryGetProperty("fontSize",out var size))
@@ -918,7 +1327,7 @@ public partial class MainWindow : Window
 
     private void Image_Click(object sender, RoutedEventArgs e)
     {
-        if (_vm.SelectedTab is null) return; var dialog = new OpenFileDialog { Filter = "Изображения|*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.tif;*.tiff" }; if (dialog.ShowDialog(this) != true) return;
+        if (_vm.SelectedTab is null) return; var dialog = new OpenFileDialog { Filter = LocalizationService.T("Изображения|*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.tif;*.tiff") }; if (dialog.ShowDialog(this) != true) return;
         try
         {
             var asset=StoreAsset(dialog.FileName);var name=asset.StoredName;var stored=Path.Combine(AppPaths.Assets,name);_vm.Database.RegisterAttachment(_vm.SelectedTab.DocumentId,Path.GetFileName(dialog.FileName),name,"image/"+Path.GetExtension(name).TrimStart('.'),asset.Size,asset.Hash);if(ModernEditor.Visibility==Visibility.Visible){_=ModernEditor.ExecuteAsync("image",new{src="https://assets.local/"+name,alt=Path.GetFileName(dialog.FileName)});LoadDocumentProperties();return;}
@@ -958,7 +1367,7 @@ public partial class MainWindow : Window
     private string? ResolveAssetPath(string source){if(!Uri.TryCreate(source,UriKind.Absolute,out var uri)||!uri.Host.Equals("assets.local",StringComparison.OrdinalIgnoreCase))return null;var file=Path.GetFileName(Uri.UnescapeDataString(uri.AbsolutePath));_vm.Database.MaterializeAsset(file);var root=Path.GetFullPath(AppPaths.Assets).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;var path=Path.GetFullPath(Path.Combine(AppPaths.Assets,file));return path.StartsWith(root,StringComparison.OrdinalIgnoreCase)&&File.Exists(path)?path:null;}
     private async void ImageReplace_Click(object sender,RoutedEventArgs e)
     {
-        if(!EnsureModernImage()||_vm.SelectedTab is null)return;var dialog=new OpenFileDialog{Title="Заменить изображение",Filter="Изображения|*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.tif;*.tiff;*.webp"};if(dialog.ShowDialog(this)!=true)return;
+        if(!EnsureModernImage()||_vm.SelectedTab is null)return;var dialog=new OpenFileDialog{Title=LocalizationService.T("Заменить изображение"),Filter=LocalizationService.T("Изображения|*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.tif;*.tiff;*.webp")};if(dialog.ShowDialog(this)!=true)return;
         try{var asset=StoreAsset(dialog.FileName);var fileName=Path.GetFileName(dialog.FileName);if(!_vm.Database.GetAttachments(_vm.SelectedTab.DocumentId).Any(x=>x.Sha256.Equals(asset.Hash,StringComparison.OrdinalIgnoreCase)))_vm.Database.RegisterAttachment(_vm.SelectedTab.DocumentId,fileName,asset.StoredName,GuessMimeType(dialog.FileName),asset.Size,asset.Hash);await ModernEditor.ExecuteAsync("imageReplace",new{src="https://assets.local/"+asset.StoredName,alt=string.IsNullOrWhiteSpace(_selectedImageAlt)?fileName:_selectedImageAlt});LoadDocumentProperties();}
         catch(Exception ex){LogService.Error("Не удалось заменить изображение",ex);MessageBox.Show(this,"Не удалось заменить изображение: "+ex.Message,"Изображение",MessageBoxButton.OK,MessageBoxImage.Error);}
     }
@@ -978,9 +1387,16 @@ public partial class MainWindow : Window
                 var guid=internalUri.AbsolutePath.Trim('/');var node=_vm.Database.FindDocumentByGuid(guid);if(node is null){MessageBox.Show(this,"Связанный документ удалён или не существует.","Битая ссылка",MessageBoxButton.OK,MessageBoxImage.Warning);return;}_vm.Open(node);ShowSelectedTab();if(internalUri.Fragment.Length>1)await ModernEditor.ExecuteAsync("gotoFragment",new{fragment=Uri.UnescapeDataString(internalUri.Fragment[1..])});return;
             }
             if(!Uri.TryCreate(value,UriKind.Absolute,out var uri))return;
-            if(uri.IsFile&&MessageBox.Show(this,$"Открыть локальный файл?\n{uri.LocalPath}","Внешний файл",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes)return;
-            if(uri.Scheme is not ("http" or "https" or "mailto" or "file")){MessageBox.Show(this,"Этот тип внешней ссылки заблокирован.","Безопасность",MessageBoxButton.OK,MessageBoxImage.Warning);return;}Process.Start(new ProcessStartInfo(uri.IsFile?uri.LocalPath:uri.AbsoluteUri){UseShellExecute=true});
+            OpenExternalLink(uri);
         }
+        catch(Exception ex){LogService.Error("Не удалось открыть ссылку",ex);MessageBox.Show(this,"Не удалось открыть ссылку: "+ex.Message,"Ссылка",MessageBoxButton.OK,MessageBoxImage.Error);}
+    }
+    private void OpenExternalLink(Uri uri)
+    {
+        if(uri.Scheme is not ("http" or "https" or "mailto" or "file")){MessageBox.Show(this,"Этот тип внешней ссылки заблокирован.","Безопасность",MessageBoxButton.OK,MessageBoxImage.Warning);return;}
+        var fullUrl=uri.IsFile?uri.LocalPath:uri.AbsoluteUri;
+        if(MessageBox.Show(this,$"Хотите перейти по ссылке?\n\n{fullUrl}","Переход по ссылке",MessageBoxButton.YesNo,uri.IsFile?MessageBoxImage.Warning:MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
+        try{Process.Start(new ProcessStartInfo(fullUrl){UseShellExecute=true});}
         catch(Exception ex){LogService.Error("Не удалось открыть ссылку",ex);MessageBox.Show(this,"Не удалось открыть ссылку: "+ex.Message,"Ссылка",MessageBoxButton.OK,MessageBoxImage.Error);}
     }
     private void ZoomOut_Click(object sender,RoutedEventArgs e)=>SetZoom(_zoom-.1);
@@ -1081,14 +1497,160 @@ public partial class MainWindow : Window
         var paragraph = Editor.CaretPosition.Paragraph; if (paragraph is not null) Editor.Document.Blocks.InsertAfter(paragraph, table); else Editor.Document.Blocks.Add(table);
     }
 
-    private void Tree_MouseMove(object sender, MouseEventArgs e) { if (e.LeftButton != MouseButtonState.Pressed || _vm.SelectedNode is null || (e.GetPosition(Tree) - _dragStart).Length < 8) return; DragDrop.DoDragDrop(Tree, _vm.SelectedNode, DragDropEffects.Move); }
-    protected override void OnPreviewMouseLeftButtonDown(MouseButtonEventArgs e) { _dragStart = e.GetPosition(Tree); base.OnPreviewMouseLeftButtonDown(e); }
+    // Перетаскивается строка, за которую взялись мышью: раньше уезжал документ, выбранный
+    // подсветкой, даже если курсор тянул соседний. Пока идёт перетаскивание, рядом с курсором
+    // едет полупрозрачная копия строки — видно, что именно и куда переносится.
+    private void Tree_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _dragNode is null || _dragGhost is not null) return;
+        if ((e.GetPosition(Tree) - _dragStart).Length < 8) return;
+        var node = _dragNode;
+        var layer = AdornerLayer.GetAdornerLayer(Tree);
+        _dragGhost = layer is null ? null : new DragGhostAdorner(Tree, node.Title, node.IsFolder);
+        if (_dragGhost is not null) layer!.Add(_dragGhost);
+        try { DragDrop.DoDragDrop(Tree, node, DragDropEffects.Move); }
+        finally
+        {
+            if (_dragGhost is not null) { AdornerLayer.GetAdornerLayer(Tree)?.Remove(_dragGhost); _dragGhost = null; }
+            _dragNode = null;
+        }
+    }
+    protected override void OnPreviewMouseLeftButtonDown(MouseButtonEventArgs e) { _dragStart = e.GetPosition(Tree); _dragNode = (ItemsControl.ContainerFromElement(Tree, e.OriginalSource as DependencyObject) as TreeViewItem)?.DataContext as NodeItem; base.OnPreviewMouseLeftButtonDown(e); }
+    protected override void OnPreviewMouseLeftButtonUp(MouseButtonEventArgs e) { _dragNode = null; base.OnPreviewMouseLeftButtonUp(e); }
+    private void Tree_DragOver(object sender, DragEventArgs e)
+    {
+        _dragGhost?.MoveTo(e.GetPosition(Tree));
+        e.Effects = e.Data.GetDataPresent(typeof(NodeItem)) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
     private void Tree_Drop(object sender, DragEventArgs e)
     {
         if (e.Data.GetData(typeof(NodeItem)) is not NodeItem source) return; var element = Tree.InputHitTest(e.GetPosition(Tree)) as DependencyObject; while (element is not null && element is not TreeViewItem) element = VisualTreeHelper.GetParent(element); var target = (element as TreeViewItem)?.DataContext as NodeItem;
-        var parent = target?.IsFolder == true ? target.Id : target?.ParentId; if (parent == source.Id || IsDescendant(source, parent)) { MessageBox.Show("Нельзя переместить папку внутрь самой себя."); return; } _vm.Database.Move(source.Id, parent); _vm.ReloadTree();
+        var parent = target?.IsFolder == true ? target.Id : target?.ParentId; if (parent == source.Id || IsDescendant(source, parent)) { MessageBox.Show("Нельзя переместить папку внутрь самой себя."); return; }
+        if (parent == source.ParentId) return;
+        MoveNode(source.Id, parent, source.ParentId);
     }
     private static bool IsDescendant(NodeItem source, long? id) => id.HasValue && (source.Children.Any(c => c.Id == id) || source.Children.Any(c => IsDescendant(c, id)));
+
+    private void MoveNode(long id,long? parentId,long? previousParentId,bool remember=true)
+    {
+        try
+        {
+            _vm.Database.Move(id,parentId);
+            if(remember)_libraryHistory.Push(new(LibraryActionKind.Move,id,previousParentId,_vm.Database.FindNode(id)?.Title??""));
+            _vm.ReloadTree();
+            UpdateNavigationCounts();
+        }
+        catch(Exception ex){LogService.Error("Не удалось переместить документ",ex);MessageBox.Show(this,ex.Message,"Перемещение",MessageBoxButton.OK,MessageBoxImage.Warning);}
+    }
+    /// <summary>Куда положить документ при вставке: в выбранную папку либо рядом с выбранным документом.</summary>
+    private long? PasteTarget()=>_vm.SelectedNode is null?null:_vm.SelectedNode.IsFolder?_vm.SelectedNode.Id:_vm.SelectedNode.ParentId;
+    private void CutNode_Click(object sender,RoutedEventArgs e)=>CutNode();
+    private void CopyNode_Click(object sender,RoutedEventArgs e)=>CopyNode();
+    private void PasteNode_Click(object sender,RoutedEventArgs e)=>PasteNode();
+    private void UndoLibrary_Click(object sender,RoutedEventArgs e)=>UndoLibraryAction();
+    private void CutNode()
+    {
+        if(_vm.SelectedNode is null)return;
+        _libraryClipboard=(_vm.SelectedNode.Id,_vm.SelectedNode.Title,true);
+        ToastService.Show("Вырезано",_vm.SelectedNode.Title+" — выберите папку и нажмите Ctrl+V.",ToastKind.Information);
+    }
+    private void CopyNode()
+    {
+        if(_vm.SelectedNode is null)return;
+        _libraryClipboard=(_vm.SelectedNode.Id,_vm.SelectedNode.Title,false);
+        ToastService.Show("Скопировано",_vm.SelectedNode.Title+" — выберите папку и нажмите Ctrl+V.",ToastKind.Information);
+    }
+    private void PasteNode()
+    {
+        if(_libraryClipboard is not{} clipboard)return;
+        var source=_vm.Database.FindNode(clipboard.Id);
+        if(source is null){_libraryClipboard=null;ToastService.Show("Вставка невозможна","Исходный документ удалён.",ToastKind.Warning);return;}
+        var target=PasteTarget();
+        try
+        {
+            if(clipboard.Cut)
+            {
+                if(target==source.Id||IsDescendant(source,target)){MessageBox.Show(this,"Нельзя переместить папку внутрь самой себя.","Вставка");return;}
+                if(target==source.ParentId)return;
+                MoveNode(source.Id,target,source.ParentId);
+                _libraryClipboard=null;
+                return;
+            }
+            if(source.IsFolder){MessageBox.Show(this,"Копировать можно только документ.","Вставка");return;}
+            var copy=_vm.Database.Duplicate(source.Id);
+            if(target!=source.ParentId)_vm.Database.Move(copy,target);
+            _libraryHistory.Push(new(LibraryActionKind.Create,copy,target,clipboard.Title));
+            _vm.ReloadTree();
+            UpdateNavigationCounts();
+            ToastService.Show("Копия создана",clipboard.Title,ToastKind.Success);
+        }
+        catch(Exception ex){LogService.Error("Не удалось вставить документ",ex);MessageBox.Show(this,ex.Message,"Вставка",MessageBoxButton.OK,MessageBoxImage.Warning);}
+    }
+    /// <summary>Ctrl+Z в библиотеке отменяет перемещение, удаление или вставку — по одному шагу.</summary>
+    private void UndoLibraryAction()
+    {
+        if(_libraryHistory.Count==0){ToastService.Show("Отменять нечего","В библиотеке не было перемещений и удалений.",ToastKind.Information);return;}
+        var action=_libraryHistory.Pop();
+        try
+        {
+            switch(action.Kind)
+            {
+                case LibraryActionKind.Move:
+                    _vm.Database.Move(action.Id,action.PreviousParentId);
+                    ToastService.Show("Перемещение отменено",action.Title,ToastKind.Success);
+                    break;
+                case LibraryActionKind.Delete:
+                    _vm.Database.Restore(action.Id);
+                    _navigationMode="all";
+                    ToastService.Show("Удаление отменено",action.Title,ToastKind.Success);
+                    break;
+                case LibraryActionKind.Create:
+                    foreach(var tab in _vm.Tabs.Where(x=>x.DocumentId==action.Id).ToList())_vm.Tabs.Remove(tab);
+                    _vm.Database.Delete(action.Id);
+                    ShowSelectedTab();
+                    ToastService.Show("Вставка отменена",action.Title+" — копия перемещена в корзину.",ToastKind.Success);
+                    break;
+            }
+            _vm.ReloadTree();
+            UpdateNavigationCounts();
+        }
+        catch(Exception ex){LogService.Error("Не удалось отменить действие в библиотеке",ex);MessageBox.Show(this,ex.Message,"Отмена действия",MessageBoxButton.OK,MessageBoxImage.Warning);}
+    }
+
+    /// <summary>Полупрозрачная копия перетаскиваемой строки, которая едет за курсором.</summary>
+    private sealed class DragGhostAdorner : Adorner
+    {
+        private readonly FormattedText _text;
+        private readonly bool _isFolder;
+        private Point _position;
+        public DragGhostAdorner(UIElement owner, string title, bool isFolder) : base(owner)
+        {
+            IsHitTestVisible = false;
+            _isFolder = isFolder;
+            _text = new FormattedText(
+                title,
+                System.Globalization.CultureInfo.CurrentUICulture,
+                FlowDirection.LeftToRight,
+                new Typeface("Segoe UI"),
+                12,
+                Brushes.White,
+                VisualTreeHelper.GetDpi(owner).PixelsPerDip) { MaxTextWidth = 220, MaxLineCount = 1, Trimming = TextTrimming.CharacterEllipsis };
+        }
+        public void MoveTo(Point position) { _position = position; InvalidateVisual(); }
+        protected override void OnRender(DrawingContext drawingContext)
+        {
+            if (_position == default) return;
+            var width = _text.Width + 34;
+            var rectangle = new Rect(_position.X + 14, _position.Y + 6, width, 26);
+            var accent = (Application.Current?.TryFindResource("Accent/Primary") as Brush) ?? Brushes.MediumPurple;
+            drawingContext.PushOpacity(.75);
+            drawingContext.DrawRoundedRectangle(new SolidColorBrush(Color.FromArgb(220, 32, 42, 56)), new Pen(accent, 1), rectangle, 5, 5);
+            drawingContext.DrawRectangle(accent, null, new Rect(rectangle.X + 8, rectangle.Y + 8, _isFolder ? 11 : 8, 10));
+            drawingContext.DrawText(_text, new Point(rectangle.X + 26, rectangle.Y + 5));
+            drawingContext.Pop();
+        }
+    }
 
     private async void Backup_Click(object sender, RoutedEventArgs e)
     {
@@ -1099,7 +1661,7 @@ public partial class MainWindow : Window
     }
     private async void Restore_Click(object sender, RoutedEventArgs e)
     {
-        var d = new OpenFileDialog { Filter = "Резервные копии (*.mdbackup)|*.mdbackup|Старые ZIP-копии (*.zip)|*.zip" };
+        var d = new OpenFileDialog { Filter = LocalizationService.T("Резервные копии (*.mdbackup)|*.mdbackup|Старые ZIP-копии (*.zip)|*.zip") };
         if (d.ShowDialog(this) != true || MessageBox.Show("Текущие данные будут заменены. Продолжить?", "Восстановление", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         if(OperationOverlay.Visibility==Visibility.Visible)return;
         try
@@ -1117,7 +1679,7 @@ public partial class MainWindow : Window
     }
     private async void Export_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "Выберите папку экспорта" };
+        var dialog = new OpenFolderDialog { Title = LocalizationService.T("Выберите папку экспорта") };
         if (dialog.ShowDialog(this) != true) return;
         _vm.SaveAll();
         var target = Path.Combine(dialog.FolderName, "MasterDocumentation-Export-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
@@ -1145,9 +1707,9 @@ public partial class MainWindow : Window
             return;
         var dialog=new SaveFileDialog
         {
-            Title="Экспорт документа",
+            Title=LocalizationService.T("Экспорт документа"),
             FileName=_vm.SelectedTab.Title,
-            Filter="PDF (*.pdf)|*.pdf|Word (*.docx)|*.docx|HTML (*.html)|*.html|Markdown (*.md)|*.md|Текст (*.txt)|*.txt",
+            Filter=LocalizationService.T("PDF (*.pdf)|*.pdf|Word (*.docx)|*.docx|HTML (*.html)|*.html|Markdown (*.md)|*.md|Текст (*.txt)|*.txt"),
             InitialDirectory=AppPaths.Exports
         };
         if(dialog.ShowDialog(this)!=true)
@@ -1285,7 +1847,7 @@ public partial class MainWindow : Window
     {
         if(BrandColumn is null||TopSearchBorder is null||LibraryColumn is null)return;
         _brandTitle??=FindVisualDescendants<TextBlock>(this).FirstOrDefault(text=>text.Text=="MasterDocumentation");
-        _templatesButton??=FindVisualDescendants<Button>(this).FirstOrDefault(button=>button.ToolTip?.ToString()=="Открыть шаблоны документов");
+        _templatesButton??=TemplatesButton;
         _applicationsButton??=FindVisualDescendants<Button>(this).FirstOrDefault(button=>button.ToolTip?.ToString()=="Открыть локальные инструменты");
         var compactHeader=width<1050;
         if(_brandTitle is not null){_brandTitle.Visibility=compactHeader?Visibility.Collapsed:Visibility.Visible;_brandTitle.ToolTip="MasterDocumentation";}
@@ -1362,7 +1924,7 @@ public partial class MainWindow : Window
     private void UpdateStartPageLayout(double width)
     {
         if(StartPrimaryActions is null||StartCardsGrid is null)return;
-        StartPrimaryActions.Columns=width<620?1:3;
+        StartPrimaryActions.Columns=width<620?1:2;
         StartPageContent.Margin=width<620?new Thickness(16):new Thickness(24);
         var stackCards=width<700;
         if(stackCards)
@@ -1482,7 +2044,7 @@ public partial class MainWindow : Window
         TabsOverflowPopup.IsOpen=false;
         _settingsView=new SettingsView(_vm.Database,_vm.Backups,_settingsService);_settingsView.SettingsSaved+=ApplySavedSettings;_settingsView.CloseRequested+=HideSettings;SettingsHost.Content=_settingsView;SettingsHost.Visibility=Visibility.Visible;Tabs.Visibility=Visibility.Collapsed;SettingsTabHeader.Visibility=Visibility.Visible;Dispatcher.BeginInvoke(new Action(UpdateSettingsHostSize));
     }
-    private void ApplySavedSettings(ApplicationSettings settings){_settings=settings;ApplyInterfacePreferences(_settings);_saveTimer.Interval=TimeSpan.FromSeconds(_settings.AutoSaveDelaySeconds);_vm.SetTheme(_settings.Theme,false);_=ModernEditor.ExecuteAsync("setTheme",new{theme=_vm.DarkTheme?"dark":"light"});Editor.FontFamily=new FontFamily(_settings.DefaultFont);Editor.FontSize=_settings.DefaultFontSize;Editor.SpellCheck.IsEnabled=_settings.SpellCheck;}
+    private void ApplySavedSettings(ApplicationSettings settings){_settings=settings;LocalizationService.SetLanguage(_settings.Language);LocalizationService.Apply(this);ApplyInterfacePreferences(_settings);_saveTimer.Interval=TimeSpan.FromSeconds(_settings.AutoSaveDelaySeconds);_vm.SetTheme(_settings.Theme,false);_=ModernEditor.ExecuteAsync("setTheme",new{theme=_vm.DarkTheme?"dark":"light"});_=ModernEditor.ExecuteAsync("setLanguage",new{language=LocalizationService.IsEnglish?"en":"ru"});Editor.FontFamily=new FontFamily(_settings.DefaultFont);Editor.FontSize=_settings.DefaultFontSize;Editor.SpellCheck.IsEnabled=_settings.SpellCheck;}
     private void SettingsHost_SizeChanged(object sender,SizeChangedEventArgs e)=>UpdateSettingsHostSize();
     private void UpdateSettingsHostSize()
     {
@@ -1509,9 +2071,15 @@ public partial class MainWindow : Window
         else if(Keyboard.Modifiers==ModifierKeys.Control&&e.Key>=Key.D1&&e.Key<=Key.D9)SelectTabByNumber((int)e.Key-(int)Key.D1);
         else if(Keyboard.Modifiers==ModifierKeys.Control&&e.Key==Key.O)ImportDocument_Click(this,new RoutedEventArgs());
         else if(Keyboard.Modifiers==ModifierKeys.Control&&e.Key==Key.P)Print_Click(this,new RoutedEventArgs());
-        else if(Keyboard.Modifiers==ModifierKeys.Shift&&e.Key==Key.F10&&Tree.IsKeyboardFocusWithin&&Tree.ContextMenu is not null){Tree.ContextMenu.PlacementTarget=Tree;Tree.ContextMenu.IsOpen=true;}
+        else if(Keyboard.Modifiers==ModifierKeys.Shift&&e.Key==Key.F10&&Tree.IsKeyboardFocusWithin&&Tree.ContextMenu is not null){_contextMenuNode=_vm.SelectedNode;Tree.ContextMenu.PlacementTarget=Tree;Tree.ContextMenu.IsOpen=true;}
         else if(e.Key==Key.F2&&Tree.IsKeyboardFocusWithin&&_vm.SelectedNode is not null)Rename_Click(this,new RoutedEventArgs());
         else if(e.Key==Key.Delete&&Tree.IsKeyboardFocusWithin&&_vm.SelectedNode is not null)Delete_Click(this,new RoutedEventArgs());
+        // Работа с деревом: вырезать, копировать, вставить и отменить последнее действие.
+        // Сочетания действуют только когда фокус в библиотеке — в редакторе они принадлежат тексту.
+        else if(Keyboard.Modifiers==ModifierKeys.Control&&e.Key==Key.X&&Tree.IsKeyboardFocusWithin)CutNode();
+        else if(Keyboard.Modifiers==ModifierKeys.Control&&e.Key==Key.C&&Tree.IsKeyboardFocusWithin)CopyNode();
+        else if(Keyboard.Modifiers==ModifierKeys.Control&&e.Key==Key.V&&Tree.IsKeyboardFocusWithin)PasteNode();
+        else if(Keyboard.Modifiers==ModifierKeys.Control&&e.Key==Key.Z&&Tree.IsKeyboardFocusWithin)UndoLibraryAction();
         else if(e.Key==Key.F11)WindowState=WindowState==WindowState.Maximized?WindowState.Normal:WindowState.Maximized;
         else if(Keyboard.Modifiers==(ModifierKeys.Control|ModifierKeys.Shift)&&e.Key==Key.F)ToggleFocusMode();
         else if(Matches("NewDocument",e))NewDocument_Click(this,new RoutedEventArgs());
@@ -1528,8 +2096,9 @@ public partial class MainWindow : Window
     private bool CloseTransientSurface()
     {
         if(CreateMenuPopup.IsOpen){CreateMenuPopup.IsOpen=false;return true;}
-        if(SectionAddPopup.IsOpen){SectionAddPopup.IsOpen=false;return true;}
+        if(AttachmentPreviewOverlay.Visibility==Visibility.Visible){CloseAttachmentPreview();return true;}
         if(SettingsHost.Visibility==Visibility.Visible){if(_settingsView?.RequestClose()!=false)HideSettings();return true;}
+        if(_startPageVisible&&_vm.SelectedTab is not null){HideStartPage();return true;}
         if(AttachmentsPanel.Visibility==Visibility.Visible){PropertiesTab_Click(this,new RoutedEventArgs());return true;}
         if(_focusMode){ToggleFocusMode();return true;}
         return false;

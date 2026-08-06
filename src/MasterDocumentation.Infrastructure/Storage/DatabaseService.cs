@@ -156,7 +156,7 @@ public sealed class DatabaseService : IDocumentStore
     }
     public string? FindStoredAttachmentByHash(string sha256) => _store.FindStoredAttachmentByHash(sha256);
     public IReadOnlyList<AttachmentInfo> GetAttachments(long documentId) => _store.GetAttachments(documentId);
-    public (string StoredName, bool IsUnused) RemoveAttachment(long attachmentId) => _store.RemoveAttachment(attachmentId);
+    public (string StoredName, bool IsUnused) RemoveAttachment(long attachmentId, bool ignoreVersions = false) => _store.RemoveAttachment(attachmentId, ignoreVersions);
     public void CleanupUnusedAssets() => _store.CleanupUnusedAssets();
 
     public void SetStatus(long id, string status) => _store.SetStatus(id, status);

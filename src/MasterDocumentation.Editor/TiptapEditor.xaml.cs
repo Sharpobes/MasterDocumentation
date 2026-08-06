@@ -24,6 +24,8 @@ public partial class TiptapEditor : UserControl
     public event EventHandler<string>? AssetOpenRequested;
     /// <summary>Вложение не найдено в тексте документа: файл прикреплён, но в содержимое не вставлен.</summary>
     public event EventHandler<string>? ImageMissing;
+    /// <summary>В текст перетащили файлы, которые нельзя вставить в документ (не изображения).</summary>
+    public event EventHandler<int>? UnsupportedFilesDropped;
     public event EventHandler<string>? LinkOpenRequested;
     public event EventHandler? EditorReady;
     /// <summary>Редактор не удалось запустить — сообщение уже показано на его месте.</summary>
@@ -86,7 +88,16 @@ public partial class TiptapEditor : UserControl
 
     private async Task StartBrowserAsync(string? profileName)
     {
-        var runtimeRoot=new[]{Path.Combine(AppContext.BaseDirectory,"FixedRuntime"),Path.Combine(AppContext.BaseDirectory,"WebView2")}.FirstOrDefault(Directory.Exists);string? browserFolder=null;if(runtimeRoot is not null){var exe=Directory.EnumerateFiles(runtimeRoot,"msedgewebview2.exe",SearchOption.AllDirectories).FirstOrDefault();browserFolder=exe is null?null:Path.GetDirectoryName(exe);if(browserFolder is not null)TryGrantRuntimePermissions(browserFolder);}var userData=Path.Combine(DataFolder,"Temp",profileName??"WebView2");Directory.CreateDirectory(userData);var environment=await CoreWebView2Environment.CreateAsync(browserFolder,userData);await Browser.EnsureCoreWebView2Async(environment);var core=Browser.CoreWebView2!;try{await core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache);}catch{ }core.Settings.AreDevToolsEnabled=false;core.Settings.AreDefaultContextMenusEnabled=false;core.Settings.IsStatusBarEnabled=false;core.Settings.IsPasswordAutosaveEnabled=false;core.Settings.IsGeneralAutofillEnabled=false;core.SetVirtualHostNameToFolderMapping("editor.local",Path.Combine(AppContext.BaseDirectory,"Editor"),CoreWebView2HostResourceAccessKind.DenyCors);var assets=Path.Combine(DataFolder,"Assets");Directory.CreateDirectory(assets);core.SetVirtualHostNameToFolderMapping("assets.local",assets,CoreWebView2HostResourceAccessKind.DenyCors);core.NavigationStarting+=(_,e)=>{if(!e.Uri.StartsWith("https://editor.local/",StringComparison.OrdinalIgnoreCase))e.Cancel=true;};core.NewWindowRequested+=(_,e)=>e.Handled=true;core.WebMessageReceived+=OnMessage;core.Navigate("https://editor.local/index.html");
+        var runtimeRoot=new[]{Path.Combine(AppContext.BaseDirectory,"Runtime","WebView2"),Path.Combine(AppContext.BaseDirectory,"FixedRuntime"),Path.Combine(AppContext.BaseDirectory,"WebView2")}.FirstOrDefault(Directory.Exists);string? browserFolder=null;if(runtimeRoot is not null){var exe=Directory.EnumerateFiles(runtimeRoot,"msedgewebview2.exe",SearchOption.AllDirectories).FirstOrDefault();browserFolder=exe is null?null:Path.GetDirectoryName(exe);if(browserFolder is not null)TryGrantRuntimePermissions(browserFolder);}var userData=Path.Combine(DataFolder,"Temp",profileName??"WebView2");Directory.CreateDirectory(userData);var environment=await CoreWebView2Environment.CreateAsync(browserFolder,userData);await Browser.EnsureCoreWebView2Async(environment);var core=Browser.CoreWebView2!;try{await core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache);}catch{ }core.Settings.AreDevToolsEnabled=false;core.Settings.AreDefaultContextMenusEnabled=false;core.Settings.IsStatusBarEnabled=false;core.Settings.IsPasswordAutosaveEnabled=false;core.Settings.IsGeneralAutofillEnabled=false;core.SetVirtualHostNameToFolderMapping("editor.local",EditorRoot(),CoreWebView2HostResourceAccessKind.DenyCors);var assets=Path.Combine(DataFolder,"Assets");Directory.CreateDirectory(assets);core.SetVirtualHostNameToFolderMapping("assets.local",assets,CoreWebView2HostResourceAccessKind.DenyCors);core.NavigationStarting+=(_,e)=>{if(!e.Uri.StartsWith("https://editor.local/",StringComparison.OrdinalIgnoreCase))e.Cancel=true;};core.NewWindowRequested+=(_,e)=>e.Handled=true;core.WebMessageReceived+=OnMessage;core.Navigate("https://editor.local/index.html");
+    }
+    /// <summary>
+    /// Файлы редактора лежат в папке Runtime рядом с приложением; прежнее расположение в корне
+    /// поддерживается, чтобы обновление поверх старой копии работало до перезаписи файлов.
+    /// </summary>
+    private static string EditorRoot()
+    {
+        var packaged=Path.Combine(AppContext.BaseDirectory,"Runtime","Editor");
+        return File.Exists(Path.Combine(packaged,"index.html"))?packaged:Path.Combine(AppContext.BaseDirectory,"Editor");
     }
     private static void TryGrantRuntimePermissions(string folder)
     {
@@ -106,6 +117,7 @@ public partial class TiptapEditor : UserControl
         if(type=="selection")SelectionChanged?.Invoke(this,root.Clone());
         if(type=="openAsset"){AssetOpenRequested?.Invoke(this,root.TryGetProperty("src",out var source)?source.GetString()??"":"");return;}
         if(type=="imageMissing"){ImageMissing?.Invoke(this,root.TryGetProperty("src",out var missing)?missing.GetString()??"":"");return;}
+        if(type=="unsupportedDrop"){UnsupportedFilesDropped?.Invoke(this,root.TryGetProperty("count",out var count)&&count.TryGetInt32(out var files)?files:0);return;}
         if(type=="openLink"){LinkOpenRequested?.Invoke(this,root.TryGetProperty("href",out var href)?href.GetString()??"":"");return;}
         if(type=="copyText"){var value=root.TryGetProperty("value",out var text)?text.GetString()??"":"";if(value.Length>0)Clipboard.SetText(value);return;}
         if(type=="fileData"){var documentId=root.TryGetProperty("documentId",out var id)&&id.TryGetInt64(out var parsed)?parsed:0;FileDropped?.Invoke(this,new EditorFileData(documentId,root.GetProperty("name").GetString()??"attachment",root.GetProperty("mime").GetString()??"application/octet-stream",root.GetProperty("data").GetString()??""));}

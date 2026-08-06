@@ -84,7 +84,11 @@ public interface IDocumentStore
     long RegisterAttachment(long documentId, string fileName, string storedName, string mime, long size, string sha256);
     string? FindStoredAttachmentByHash(string sha256);
     IReadOnlyList<AttachmentInfo> GetAttachments(long documentId);
-    (string StoredName, bool IsUnused) RemoveAttachment(long attachmentId);
+    /// <param name="ignoreVersions">
+    /// Не считать использованием ссылки из истории версий. Нужно при явном удалении вложения:
+    /// иначе снимок, сделанный автосохранением секунду назад, навсегда удерживает файл на диске.
+    /// </param>
+    (string StoredName, bool IsUnused) RemoveAttachment(long attachmentId, bool ignoreVersions = false);
     void CleanupUnusedAssets();
 
     // Статусы

@@ -4,6 +4,7 @@
 
     <Geometry x:Key="Icon.App">M4,3 L10,3 10,10 4,10 Z M14,3 L20,3 20,10 14,10 Z M4,14 L10,14 10,21 4,21 Z M14,14 L20,14 20,21 14,21 Z</Geometry>
     <Geometry x:Key="Icon.Menu">M4,6 L20,6 M4,12 L20,12 M4,18 L20,18</Geometry>
+    <Geometry x:Key="Icon.Home">M3,11 L12,3 21,11 M5,9.5 L5,21 19,21 19,9.5 M10,21 L10,14 14,14 14,21</Geometry>
     <Geometry x:Key="Icon.Document">M6,2 L14,2 19,7 19,22 6,22 Z M14,2 L14,7 19,7 M9,12 L16,12 M9,16 L16,16</Geometry>
     <Geometry x:Key="Icon.Folder">M2,6 L9,6 11,9 22,9 22,20 2,20 Z</Geometry>
     <Geometry x:Key="Icon.Add">M12,4 L12,20 M4,12 L20,12</Geometry>

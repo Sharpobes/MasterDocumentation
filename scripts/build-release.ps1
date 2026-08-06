@@ -106,17 +106,20 @@ if (Test-Path -LiteralPath $publish) { Remove-Item -LiteralPath $publish -Recurs
 New-Item -ItemType Directory -Force -Path $publish | Out-Null
 dotnet publish $project -c Release -r win-x64 --self-contained true --no-build -p:Version=$Version -o $publish
 
-# В корне остаётся только MasterDocumentation.exe рядом с папками Editor и WebView2:
-# отладочные символы и XML-документация пакетов пользователю не нужны.
+# В корне остаётся только MasterDocumentation.exe рядом с папкой Runtime: отладочные символы,
+# XML-документация пакетов и загрузчики WebView2 для чужих архитектур пользователю не нужны —
+# нужный WebView2Loader.dll упакован в сам EXE вместе с остальным машинным кодом.
 Get-ChildItem -LiteralPath $publish -Filter '*.pdb' -File | Remove-Item -Force
 Get-ChildItem -LiteralPath $publish -Filter '*.xml' -File | Remove-Item -Force
+$loaders = Join-Path $publish 'runtimes'
+if (Test-Path -LiteralPath $loaders) { Remove-Item -LiteralPath $loaders -Recurse -Force }
 Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $publish
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $publish
 Copy-Item -LiteralPath (Join-Path $root 'docs\INSTALLATION.md') -Destination (Join-Path $publish 'INSTALLATION.md')
 
 if (-not (Test-Path -LiteralPath (Join-Path $publish 'MasterDocumentation.exe'))) { throw 'MasterDocumentation.exe was not published.' }
-if (-not (Test-Path -LiteralPath (Join-Path $publish 'Editor\index.html'))) { throw 'Local TipTap editor is missing from publish output.' }
-if (-not (Get-ChildItem -LiteralPath (Join-Path $publish 'WebView2') -Filter 'msedgewebview2.exe' -Recurse -ErrorAction SilentlyContinue)) { throw 'Fixed WebView2 Runtime is missing from publish output.' }
+if (-not (Test-Path -LiteralPath (Join-Path $publish 'Runtime\Editor\index.html'))) { throw 'Local TipTap editor is missing from publish output.' }
+if (-not (Get-ChildItem -LiteralPath (Join-Path $publish 'Runtime\WebView2') -Filter 'msedgewebview2.exe' -Recurse -ErrorAction SilentlyContinue)) { throw 'Fixed WebView2 Runtime is missing from publish output.' }
 
 Invoke-CodeSign (Join-Path $publish 'MasterDocumentation.exe')
 

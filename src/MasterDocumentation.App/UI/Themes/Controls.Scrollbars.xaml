@@ -13,7 +13,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type Thumb}">
-                    <Border x:Name="Chrome" Margin="3,2" Background="{DynamicResource ScrollThumbBrush}" CornerRadius="{StaticResource Radius.Pill}"/>
+                    <Border x:Name="Chrome" Margin="3,2" Background="{DynamicResource ScrollThumbBrush}" CornerRadius="0"/>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Accent/Hover}"/></Trigger>
                         <Trigger Property="IsDragging" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Accent/Primary}"/></Trigger>
@@ -33,7 +33,7 @@
                             Height="3"
                             VerticalAlignment="Center"
                             Background="{DynamicResource ScrollThumbBrush}"
-                            CornerRadius="{StaticResource Radius.Pill}"/>
+                            CornerRadius="0"/>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter Property="Opacity" Value="0.9"/>
@@ -51,7 +51,9 @@
     <Style TargetType="{x:Type ScrollBar}">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Width" Value="14"/>
-        <Setter Property="Height" Value="14"/>
+        <!-- A vertical scrollbar must be allowed to occupy the full available height.
+             Fixing both dimensions to 14 collapsed every vertical track to a tiny glyph. -->
+        <Setter Property="Height" Value="Auto"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type ScrollBar}">
@@ -68,7 +70,7 @@
         <Style.Triggers>
             <Trigger Property="Orientation" Value="Horizontal">
                 <Setter Property="Width" Value="Auto"/>
-                <Setter Property="Height" Value="4"/>
+                <Setter Property="Height" Value="14"/>
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="{x:Type ScrollBar}">

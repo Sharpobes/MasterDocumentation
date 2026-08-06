@@ -22,6 +22,8 @@ public partial class ToastWindow : Window
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoOwnerZOrder = 0x0200;
     private const double ScreenMargin = 8;
+    /// <summary>Отступ снизу поднимает карточку над строкой состояния главного окна (34 px).</summary>
+    private const double BottomMargin = 44;
 
     private readonly Window _owner;
     private bool _closing;
@@ -93,7 +95,7 @@ public partial class ToastWindow : Window
             var self = PresentationSource.FromVisual(this)?.CompositionTarget;
             if (self is null) return;
             var size = self.TransformToDevice.Transform(new Point(ActualWidth, ActualHeight));
-            var margin = self.TransformToDevice.Transform(new Point(ScreenMargin, ScreenMargin));
+            var margin = self.TransformToDevice.Transform(new Point(ScreenMargin, BottomMargin));
 
             Point anchor;
             if (PresentationSource.FromVisual(_owner) is not null && _owner.ActualWidth > 0)

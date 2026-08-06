@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using MasterDocumentation.UI;
+using MasterDocumentation.Utilities;
 
 namespace MasterDocumentation.Views;
 
@@ -193,6 +194,8 @@ public static class ToastService
             return;
         }
         _window ??= new ToastWindow(owner);
-        _window.Host.Show(title, message, kind, duration, primaryActionText, primaryAction, secondaryActionText, secondaryAction);
+        _window.Host.Show(LocalizationService.T(title),LocalizationService.T(message),kind,duration,
+            primaryActionText is null?null:LocalizationService.T(primaryActionText),primaryAction,
+            secondaryActionText is null?null:LocalizationService.T(secondaryActionText),secondaryAction);
     }
 }

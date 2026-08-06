@@ -106,7 +106,8 @@ public static class InstallEngine
             // Портативная версия хранит данные рядом с собой: файл с расположением не нужен.
             var pointer = Path.Combine(target, "data-location.txt");
             if (File.Exists(pointer)) File.Delete(pointer);
-            Directory.CreateDirectory(Path.Combine(target, "Data"));
+            // Хранилище портативной копии — сама папка приложения: подпапки Assets, Documents,
+            // Logs, Backups и Exports создаст приложение при первом запуске.
             if (options.DesktopShortcut) CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), ApplicationName + ".lnk"), executable, target);
         }
 

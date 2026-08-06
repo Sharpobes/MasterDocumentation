@@ -20,6 +20,17 @@ import DOMPurify from 'dompurify'
 
 const lowlight=createLowlight(all)
 const codeLanguages=['csharp','javascript','typescript','xml','css','json','sql','powershell','bash','python','java','cpp','yaml']
+let editorLanguage='ru'
+const editorEnglish={
+  'Построение диаграммы…':'Rendering diagram…','Изображение':'Image','Форматирование выделенного текста':'Format selected text','Вставка блока':'Insert block',
+  'Полужирный (Ctrl+B)':'Bold (Ctrl+B)','Курсив (Ctrl+I)':'Italic (Ctrl+I)','Подчёркивание (Ctrl+U)':'Underline (Ctrl+U)','Зачёркивание':'Strikethrough','Моноширинный текст':'Monospace text',
+  'Обычный текст':'Normal text','Абзац':'Paragraph','Заголовок 1':'Heading 1','Крупный раздел':'Major section','Заголовок 2':'Heading 2','Подраздел':'Subsection',
+  'Маркированный список':'Bulleted list','Список с маркерами':'List with bullets','Нумерованный список':'Numbered list','Список с номерами':'List with numbers',
+  'Чек-лист':'Checklist','Список задач':'Task list','Цитата':'Quote','Выделенный блок':'Highlighted block','Блок кода':'Code block','Автоопределение языка':'Automatic language detection',
+  'Таблица':'Table','Примечание':'Note','Информационный блок':'Information block','Разделитель':'Divider','Горизонтальная линия':'Horizontal line','Команды не найдены':'No commands found',
+  'Начните писать или нажмите / для выбора блока':'Start typing or press / to choose a block','Разрыв страницы':'Page break','Безопасный HTML':'Safe HTML'
+}
+const editorText=value=>editorLanguage==='en'?(editorEnglish[value]||value):value
 const Spoiler=Mark.create({
   name:'spoiler',inclusive:true,
   parseHTML:()=>[{tag:'span[data-spoiler]'}],
@@ -87,7 +98,7 @@ configureMermaid()
 const MermaidDiagram=Node.create({
   name:'mermaidDiagram',group:'block',atom:true,
   addAttributes(){return{code:{default:'flowchart LR\n  A --> B'}}},parseHTML:()=>[{tag:'div[data-mermaid]'}],renderHTML:({HTMLAttributes})=>['div',mergeAttributes(HTMLAttributes,{'data-mermaid':HTMLAttributes.code,class:'mermaid-node'}),HTMLAttributes.code],
-  addNodeView(){return({node})=>{const dom=document.createElement('div');dom.className='mermaid-node';let revision=0;const draw=async code=>{const current=++revision;dom.textContent='Построение диаграммы…';dom.dataset.mermaid=code;try{const result=await mermaid.render(`md-mermaid-${++mermaidSequence}`,code);if(current===revision)dom.innerHTML=result.svg}catch(error){if(current===revision){dom.className='mermaid-node mermaid-error';dom.textContent=String(error)}}};draw(node.attrs.code);return{dom,update:updated=>{if(updated.type.name!=='mermaidDiagram')return false;dom.className='mermaid-node';draw(updated.attrs.code);return true}}}}
+  addNodeView(){return({node})=>{const dom=document.createElement('div');dom.className='mermaid-node';let revision=0;const draw=async code=>{const current=++revision;dom.textContent=editorText('Построение диаграммы…');dom.dataset.mermaid=code;try{const result=await mermaid.render(`md-mermaid-${++mermaidSequence}`,code);if(current===revision)dom.innerHTML=result.svg}catch(error){if(current===revision){dom.className='mermaid-node mermaid-error';dom.textContent=String(error)}}};draw(node.attrs.code);return{dom,update:updated=>{if(updated.type.name!=='mermaidDiagram')return false;dom.className='mermaid-node';draw(updated.attrs.code);return true}}}}
 })
 
 const post = payload => window.chrome?.webview?.postMessage(payload)
@@ -106,7 +117,7 @@ const headings = editor => {
   })
   return result
 }
-const documentText=editor=>editor.state.doc.textBetween(0,editor.state.doc.content.size,'\n',node=>node.type.name==='formula'?node.attrs.latex:node.type.name==='mermaidDiagram'?`Mermaid:\n${node.attrs.code}`:node.type.name==='safeHtml'?node.attrs.code:node.type.name==='anchor'?node.attrs.name:node.type.name==='pageBreak'?'\n':node.type.name==='image'?node.attrs.alt||'Изображение':'')
+const documentText=editor=>editor.state.doc.textBetween(0,editor.state.doc.content.size,'\n',node=>node.type.name==='formula'?node.attrs.latex:node.type.name==='mermaidDiagram'?`Mermaid:\n${node.attrs.code}`:node.type.name==='safeHtml'?node.attrs.code:node.type.name==='anchor'?node.attrs.name:node.type.name==='pageBreak'?'\n':node.type.name==='image'?node.attrs.alt||editorText('Изображение'):'')
 const contentPayload = (editor,type,extra={}) => ({type,documentId:currentDocumentId,json:editor.getJSON(),html:editor.getHTML(),text:documentText(editor),headings:headings(editor),...extra})
 const emitContent = editor => post(contentPayload(editor,'change'))
 let contentFrame=0
@@ -159,8 +170,8 @@ const createEditorPopup=(className,role,label)=>{
   document.body.append(popup)
   return popup
 }
-const selectionToolbar=createEditorPopup('selection-toolbar','toolbar','Форматирование выделенного текста')
-const slashMenu=createEditorPopup('slash-menu','listbox','Вставка блока')
+const selectionToolbar=createEditorPopup('selection-toolbar','toolbar',editorText('Форматирование выделенного текста'))
+const slashMenu=createEditorPopup('slash-menu','listbox',editorText('Вставка блока'))
 const toolbarActions=[
   ['B','Полужирный (Ctrl+B)',()=>editor.chain().focus().toggleBold().run(),'bold'],
   ['I','Курсив (Ctrl+I)',()=>editor.chain().focus().toggleItalic().run(),'italic'],
@@ -172,8 +183,9 @@ toolbarActions.forEach(([label,title,action,mark])=>{
   const button=document.createElement('button')
   button.type='button'
   button.textContent=label
-  button.title=title
-  button.setAttribute('aria-label',title)
+  button.dataset.editorTitle=title
+  button.title=editorText(title)
+  button.setAttribute('aria-label',editorText(title))
   button.addEventListener('mousedown',event=>{event.preventDefault();action();requestAnimationFrame(()=>updateContextUi(editor))})
   button.dataset.mark=mark
   selectionToolbar.append(button)
@@ -191,6 +203,17 @@ const slashActions=[
   {label:'Примечание',hint:'Информационный блок',keywords:'callout note заметка',run:()=>editor.chain().focus().wrapIn('callout',{kind:'info',label:'Примечание'}).run()},
   {label:'Разделитель',hint:'Горизонтальная линия',keywords:'line rule линия',run:()=>editor.chain().focus().setHorizontalRule().run()}
 ]
+const applyEditorLanguage=language=>{
+  editorLanguage=language==='en'?'en':'ru'
+  document.documentElement.lang=editorLanguage
+  selectionToolbar.setAttribute('aria-label',editorText('Форматирование выделенного текста'))
+  slashMenu.setAttribute('aria-label',editorText('Вставка блока'))
+  selectionToolbar.querySelectorAll('[data-editor-title]').forEach(button=>{const title=editorText(button.dataset.editorTitle||'');button.title=title;button.setAttribute('aria-label',title)})
+  document.documentElement.style.setProperty('--editor-placeholder',JSON.stringify(editorText('Начните писать или нажмите / для выбора блока')))
+  document.documentElement.style.setProperty('--page-break-label',JSON.stringify(editorText('Разрыв страницы')))
+  document.documentElement.style.setProperty('--safe-html-label',JSON.stringify(editorText('Безопасный HTML')))
+  hideContextPopups()
+}
 let slashFiltered=[]
 let slashIndex=0
 const hideContextPopups=()=>{selectionToolbar.hidden=true;slashMenu.hidden=true}
@@ -212,13 +235,13 @@ const runSlashAction=item=>{
 }
 const renderSlashMenu=(query,rect)=>{
   const normalized=query.trim().toLocaleLowerCase()
-  slashFiltered=slashActions.filter(item=>!normalized||`${item.label} ${item.hint} ${item.keywords}`.toLocaleLowerCase().includes(normalized)).slice(0,8)
+  slashFiltered=slashActions.filter(item=>!normalized||`${editorText(item.label)} ${editorText(item.hint)} ${item.label} ${item.hint} ${item.keywords}`.toLocaleLowerCase().includes(normalized)).slice(0,8)
   slashIndex=Math.min(slashIndex,Math.max(0,slashFiltered.length-1))
   slashMenu.replaceChildren()
   if(!slashFiltered.length){
     const empty=document.createElement('div')
     empty.className='slash-empty'
-    empty.textContent='Команды не найдены'
+    empty.textContent=editorText('Команды не найдены')
     slashMenu.append(empty)
   }else slashFiltered.forEach((item,index)=>{
     const button=document.createElement('button')
@@ -226,7 +249,7 @@ const renderSlashMenu=(query,rect)=>{
     button.className=index===slashIndex?'selected':''
     button.setAttribute('role','option')
     button.setAttribute('aria-selected',String(index===slashIndex))
-    button.innerHTML=`<span>${item.label}</span><small>${item.hint}</small>`
+    button.innerHTML=`<span>${editorText(item.label)}</span><small>${editorText(item.hint)}</small>`
     button.addEventListener('mousedown',event=>{event.preventDefault();runSlashAction(item)})
     slashMenu.append(button)
   })
@@ -271,11 +294,31 @@ editor.view.dom.addEventListener('keydown',event=>{
 editor.view.dom.addEventListener('blur',()=>setTimeout(()=>{if(!selectionToolbar.matches(':hover')&&!slashMenu.matches(':hover'))hideContextPopups()},120))
 window.addEventListener('resize',()=>updateContextUi(editor))
 window.addEventListener('scroll',()=>updateContextUi(editor),true)
-const transferFiles=files=>Array.from(files||[]).forEach(file=>{const reader=new FileReader();reader.onload=()=>post({type:'fileData',documentId:currentDocumentId,name:file.name||`clipboard-${Date.now()}.png`,mime:file.type||'application/octet-stream',data:String(reader.result||'')});reader.readAsDataURL(file)})
+// В текст принимаются только изображения: остальные файлы вставить в документ нельзя,
+// их место — панель вложений, куда их и предлагается перетащить.
+const transferFiles=files=>{
+  const list=Array.from(files||[])
+  const images=list.filter(file=>String(file.type||'').startsWith('image/'))
+  images.forEach(file=>{const reader=new FileReader();reader.onload=()=>post({type:'fileData',documentId:currentDocumentId,name:file.name||`clipboard-${Date.now()}.png`,mime:file.type||'application/octet-stream',data:String(reader.result||'')});reader.readAsDataURL(file)})
+  if(images.length<list.length)post({type:'unsupportedDrop',count:list.length-images.length})
+}
 editor.view.dom.addEventListener('paste',event=>{const files=event.clipboardData?.files;if(files?.length){event.preventDefault();transferFiles(files)}})
 editor.view.dom.addEventListener('dragover',event=>{if(event.dataTransfer?.types?.includes('Files'))event.preventDefault()})
 editor.view.dom.addEventListener('drop',event=>{const files=event.dataTransfer?.files;if(files?.length){event.preventDefault();transferFiles(files)}})
 
+// Переход к главе ставит её название в самый верх окна, а не «куда-нибудь в видимую область»:
+// штатный scrollIntoView оставлял заголовок у нижнего края, а если он уже был виден — не двигал
+// страницу вообще.
+const scrollNodeToTop=position=>{
+  requestAnimationFrame(()=>{
+    let node=null
+    try{node=editor.view.nodeDOM(position)||editor.view.domAtPos(position+1)?.node}catch{node=null}
+    const element=node instanceof HTMLElement?node:node?.parentElement
+    if(!element)return
+    const top=element.getBoundingClientRect().top+window.scrollY-12
+    window.scrollTo({top:Math.max(0,top),behavior:'smooth'})
+  })
+}
 const finiteOrNull=value=>{if(value===null||value===undefined||value==='')return null;const number=Number(value);return Number.isFinite(number)?number:null}
 const paragraphAttributes=args=>({spaceBefore:finiteOrNull(args.spaceBefore),spaceAfter:finiteOrNull(args.spaceAfter),firstIndent:finiteOrNull(args.firstIndent),leftIndent:finiteOrNull(args.leftIndent),rightIndent:finiteOrNull(args.rightIndent),textDirection:['ltr','rtl'].includes(args.textDirection)?args.textDirection:null})
 const copyCurrentFormatting=()=>{const state=editor.state,marks=state.selection.$from.marks().filter(mark=>mark.type.name!=='link'&&mark.type.name!=='spoiler').map(mark=>({type:mark.type.name,attrs:{...mark.attrs}})),block=state.selection.$from.parent;copiedFormatting={marks,blockAttrs:{textAlign:block.attrs.textAlign??null,lineHeight:block.attrs.lineHeight??null,spaceBefore:block.attrs.spaceBefore??null,spaceAfter:block.attrs.spaceAfter??null,firstIndent:block.attrs.firstIndent??null,leftIndent:block.attrs.leftIndent??null,rightIndent:block.attrs.rightIndent??null,textDirection:block.attrs.textDirection??null}};return true}
@@ -319,13 +362,17 @@ const commands = {
   imageCrop:a=>editor.state.selection.node?.type.name==='image'&&editor.chain().focus().updateAttributes('image',{cropTop:Math.max(0,Math.min(45,Number(a.top)||0)),cropRight:Math.max(0,Math.min(45,Number(a.right)||0)),cropBottom:Math.max(0,Math.min(45,Number(a.bottom)||0)),cropLeft:Math.max(0,Math.min(45,Number(a.left)||0))}).run(),
   imageCopy:async()=>{const node=editor.state.selection.node;if(node?.type.name!=='image')return false;try{const blob=await fetch(node.attrs.src).then(response=>response.blob());await navigator.clipboard.write([new ClipboardItem({[blob.type]:blob})]);return true}catch(error){post({type:'copyText',value:node.attrs.src||''});return false}},
   imageDelete:()=>editor.state.selection.node?.type.name==='image'&&editor.chain().focus().deleteSelection().run(),
+  // Удаление вложения убирает картинку и из текста: иначе документ ссылается на файл,
+  // которого больше нет, и на его месте остаётся пустой прямоугольник.
+  removeImagesBySrc:a=>{const needle=String(a.src||'');if(!needle)return false;const positions=[];editor.state.doc.descendants((node,pos)=>{if(node.type.name==='image'&&String(node.attrs.src||'').includes(needle))positions.push({pos,size:node.nodeSize})});if(!positions.length)return false;let transaction=editor.state.tr;positions.reverse().forEach(({pos,size})=>{transaction=transaction.delete(transaction.mapping.map(pos),transaction.mapping.map(pos+size))});editor.view.dispatch(transaction);return true},
   imageOpen:()=>{const node=editor.state.selection.node;if(node?.type.name!=='image')return false;post({type:'openAsset',src:node.attrs.src||''});return true},
   // Выделяет картинку вложения прямо в тексте: иначе непонятно, где она в документе,
   // а панель свойств продолжает править другое, ранее выбранное изображение.
   selectImage:a=>{const needle=String(a.src||'');if(!needle)return false;let position=null;editor.state.doc.descendants((node,pos)=>{if(position!==null)return false;if(node.type.name==='image'&&String(node.attrs.src||'').includes(needle))position=pos;return position===null});if(position===null){post({type:'imageMissing',src:needle});return false}return editor.chain().focus().setNodeSelection(position).scrollIntoView().run()},
-  table:a=>editor.chain().focus().insertTable({rows:a.rows||3,cols:a.cols||3,withHeaderRow:true}).run(), gotoHeading:a=>editor.chain().focus().setTextSelection(Number(a.pos)+1).scrollIntoView().run(),
-  gotoFragment:a=>{const fragment=decodeURIComponent(String(a.fragment||'')).toLocaleLowerCase();let position=null;editor.state.doc.descendants((node,pos)=>{if(position!==null)return false;if(node.type.name==='anchor'&&String(node.attrs.name||'').toLocaleLowerCase()===fragment)position=pos;else if(node.type.name==='heading'){const slug=node.textContent.trim().toLocaleLowerCase().replace(/[^a-zа-яё0-9]+/gu,'-').replace(/^-|-$/g,'');if(slug===fragment||node.textContent.trim().toLocaleLowerCase()===fragment)position=pos}return position===null});if(position===null)return false;return editor.chain().focus().setTextSelection(position+1).scrollIntoView().run()},setZoom:a=>{document.querySelector('main').style.zoom=String(Math.max(.5,Math.min(2,Number(a.value)||1)));return true},
+  table:a=>editor.chain().focus().insertTable({rows:a.rows||3,cols:a.cols||3,withHeaderRow:true}).run(), gotoHeading:a=>{const pos=Number(a.pos);const done=editor.chain().focus().setTextSelection(pos+1).run();scrollNodeToTop(pos);return done},
+  gotoFragment:a=>{const fragment=decodeURIComponent(String(a.fragment||'')).toLocaleLowerCase();let position=null;editor.state.doc.descendants((node,pos)=>{if(position!==null)return false;if(node.type.name==='anchor'&&String(node.attrs.name||'').toLocaleLowerCase()===fragment)position=pos;else if(node.type.name==='heading'){const slug=node.textContent.trim().toLocaleLowerCase().replace(/[^a-zа-яё0-9]+/gu,'-').replace(/^-|-$/g,'');if(slug===fragment||node.textContent.trim().toLocaleLowerCase()===fragment)position=pos}return position===null});if(position===null)return false;const moved=editor.chain().focus().setTextSelection(position+1).run();scrollNodeToTop(position);return moved},setZoom:a=>{document.querySelector('main').style.zoom=String(Math.max(.5,Math.min(2,Number(a.value)||1)));return true},
   setTheme:a=>{editorTheme=a.theme==='light'?'light':'dark';document.documentElement.dataset.theme=editorTheme;configureMermaid();let transaction=editor.state.tr;editor.state.doc.descendants((node,pos)=>{if(node.type.name==='mermaidDiagram')transaction=transaction.setNodeMarkup(pos,undefined,{...node.attrs})});if(transaction.docChanged)editor.view.dispatch(transaction);return true},
+  setLanguage:a=>{applyEditorLanguage(a.language);return true},
   find:a=>window.find(String(a.query||''),Boolean(a.caseSensitive),Boolean(a.backward),true,false,false,false)
 }
 window.chrome?.webview?.addEventListener('message', event => {
@@ -344,4 +391,4 @@ window.chrome?.webview?.addEventListener('message', event => {
   }
 })
 post({type:'ready'})
-document.addEventListener('click',event=>{const spoiler=event.target.closest?.('[data-spoiler]');if(spoiler){spoiler.classList.toggle('revealed');event.preventDefault();return}const link=event.target.closest?.('a[href]');if(link&&(event.ctrlKey||event.detail>1)){post({type:'openLink',href:link.getAttribute('href')||''});event.preventDefault()}})
+document.addEventListener('click',event=>{const spoiler=event.target.closest?.('[data-spoiler]');if(spoiler){spoiler.classList.toggle('revealed');event.preventDefault();return}const link=event.target.closest?.('a[href]');if(link){post({type:'openLink',href:link.getAttribute('href')||''});event.preventDefault()}})

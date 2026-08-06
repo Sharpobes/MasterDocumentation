@@ -213,7 +213,7 @@ public partial class SetupWindow : Window
         DonePanel.Visibility = Visibility.Visible;
         DoneTitle.Text = options.Mode == InstallMode.Portable ? "Портативная версия готова" : "Установка завершена";
         DoneText.Text = options.Mode == InstallMode.Portable
-            ? $"Приложение распаковано в {_installedDirectory}.\nДокументация хранится в подпапке Data — переносите папку целиком.\nЗапуск: MasterDocumentation.exe."
+            ? $"Приложение распаковано в {_installedDirectory}.\nДокументация хранится там же, в папках Assets, Documents, Backups и Exports — переносите папку целиком.\nЗапуск: MasterDocumentation.exe."
             : $"Приложение установлено в {_installedDirectory}.\nДокументация хранится в {InstallEngine.DefaultDataDirectory}.\nУдаление — через «Параметры → Приложения» или ярлык «Удалить».";
         PrimaryButton.Content = "Готово";
         PrimaryButton.IsEnabled = true;

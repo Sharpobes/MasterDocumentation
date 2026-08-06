@@ -15,8 +15,8 @@ public partial class AppDialog : Window
     public AppDialog(string message, string caption, MessageBoxButton buttons, MessageBoxImage image)
     {
         InitializeComponent();
-        Title = string.IsNullOrWhiteSpace(caption) ? "MasterDocumentation" : caption;
-        MessageText.Text = message;
+        Title = string.IsNullOrWhiteSpace(caption) ? "MasterDocumentation" : LocalizationService.T(caption);
+        MessageText.Text = LocalizationService.T(message);
         _buttons = buttons;
         ConfigureIcon(image);
         ConfigureButtons(buttons);
@@ -45,20 +45,20 @@ public partial class AppDialog : Window
         switch (buttons)
         {
             case MessageBoxButton.OK:
-                AddButton("ОК", MessageBoxResult.OK, isDefault: true, primary: true);
+                AddButton(LocalizationService.T("ОК"), MessageBoxResult.OK, isDefault: true, primary: true);
                 break;
             case MessageBoxButton.OKCancel:
-                AddButton("Отмена", MessageBoxResult.Cancel, isCancel: true);
-                AddButton("ОК", MessageBoxResult.OK, isDefault: true, primary: true);
+                AddButton(LocalizationService.T("Отмена"), MessageBoxResult.Cancel, isCancel: true);
+                AddButton(LocalizationService.T("ОК"), MessageBoxResult.OK, isDefault: true, primary: true);
                 break;
             case MessageBoxButton.YesNo:
-                AddButton("Нет", MessageBoxResult.No);
-                AddButton("Да", MessageBoxResult.Yes, isDefault: true, primary: true);
+                AddButton(LocalizationService.T("Нет"), MessageBoxResult.No);
+                AddButton(LocalizationService.T("Да"), MessageBoxResult.Yes, isDefault: true, primary: true);
                 break;
             case MessageBoxButton.YesNoCancel:
-                AddButton("Отмена", MessageBoxResult.Cancel, isCancel: true);
-                AddButton("Нет", MessageBoxResult.No);
-                AddButton("Да", MessageBoxResult.Yes, isDefault: true, primary: true);
+                AddButton(LocalizationService.T("Отмена"), MessageBoxResult.Cancel, isCancel: true);
+                AddButton(LocalizationService.T("Нет"), MessageBoxResult.No);
+                AddButton(LocalizationService.T("Да"), MessageBoxResult.Yes, isDefault: true, primary: true);
                 break;
         }
     }
