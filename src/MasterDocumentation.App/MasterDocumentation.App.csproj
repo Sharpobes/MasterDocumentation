@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>MasterDocumentation</RootNamespace>
     <AssemblyName>MasterDocumentation</AssemblyName>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <!-- Все библиотеки упакованы в сам EXE, включая машинный код: рядом с приложением остаются

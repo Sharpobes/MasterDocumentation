@@ -41,7 +41,7 @@ public partial class SettingsView : UserControl
         DefaultFontBox.SelectedItem=Fonts.SystemFontFamilies.FirstOrDefault(x=>x.Source==_settings.DefaultFont);DefaultFontSizeBox.Text=_settings.DefaultFontSize.ToString();SpellCheckBox.IsChecked=_settings.SpellCheck;AutoSaveDelayBox.Text=_settings.AutoSaveDelaySeconds.ToString();SelectCombo(ThemeBox,_settings.Theme);EncryptionCheck.IsChecked=_settings.EncryptManualBackups;
         DataPathBox.Text=AppPaths.Data;AssetsPathText.Text=AppPaths.Assets;BackupsPathText.Text=AppPaths.Backups;ExportsPathText.Text=AppPaths.Exports;DocumentsPathText.Text=AppPaths.Documents;StorageUserBox.Text=UserIdentity.Current;RuntimeText.Text=$"Версия .NET: {Environment.Version}";AppPathText.Text="Путь приложения: "+AppContext.BaseDirectory;LoadHotkeys();
         StorageProviderPostgresRadio.IsChecked=_storageConfig.Provider==StorageProviderKind.Postgres;StorageProviderSqliteRadio.IsChecked=_storageConfig.Provider!=StorageProviderKind.Postgres;PostgresConnectionStringBox.Text=_storageConfig.PostgresConnectionString;PostgresConfigPanel.Visibility=_storageConfig.Provider==StorageProviderKind.Postgres?Visibility.Visible:Visibility.Collapsed;StorageProviderStatusText.Text="";
-        _dirty=false;SaveButton.IsEnabled=false;
+        _dirty=false;SaveButton.IsEnabled=false;ApplyButton.IsEnabled=false;
     }
 
     private void LoadStatistics()
@@ -126,7 +126,7 @@ public partial class SettingsView : UserControl
         if(Window.GetWindow(this) is DependencyObject root)LocalizationService.Apply(root);else LocalizationService.Apply(this);
         MarkDirty();
     }
-    private void MarkDirty(){if(_loading)return;_dirty=true;SaveButton.IsEnabled=true;}
+    private void MarkDirty(){if(_loading)return;_dirty=true;SaveButton.IsEnabled=true;ApplyButton.IsEnabled=true;}
     private void RecentMinus_Click(object sender,RoutedEventArgs e){RecentCountText.Text=Math.Max(1,int.Parse(RecentCountText.Text)-1).ToString();MarkDirty();}
     private void RecentPlus_Click(object sender,RoutedEventArgs e){RecentCountText.Text=Math.Min(100,int.Parse(RecentCountText.Text)+1).ToString();MarkDirty();}
 
@@ -142,7 +142,7 @@ public partial class SettingsView : UserControl
         _settingsService.Save(_settings);
         _storageConfig=new StorageProviderConfig{Provider=newProvider,PostgresConnectionString=PostgresConnectionStringBox.Text.Trim()};StorageConfigService.Save(_storageConfig);
         if(StorageUserBox.Text.Trim().Length>0&&StorageUserBox.Text.Trim()!=UserIdentity.Current)UserIdentity.Set(StorageUserBox.Text.Trim());
-        _dirty=false;SaveButton.IsEnabled=false;SettingsSaved?.Invoke(_settings);
+        _dirty=false;SaveButton.IsEnabled=false;ApplyButton.IsEnabled=false;SettingsSaved?.Invoke(_settings);
         if(providerChanged)MessageBox.Show(Window.GetWindow(this),"Провайдер хранения изменён. Перезапустите приложение, чтобы изменения вступили в силу.","Хранилище",MessageBoxButton.OK,MessageBoxImage.Information);
         return true;
     }
@@ -194,6 +194,8 @@ public partial class SettingsView : UserControl
     }
 
     private void Save_Click(object sender,RoutedEventArgs e){if(SaveSettings())CloseRequested?.Invoke();}
+    /// <summary>Сохраняет настройки, не закрывая вкладку: результат виден сразу, правку можно продолжить.</summary>
+    private void Apply_Click(object sender,RoutedEventArgs e){SaveSettings();}
     private void Cancel_Click(object sender,RoutedEventArgs e){if(RequestClose())CloseRequested?.Invoke();}
     public bool RequestClose()
     {

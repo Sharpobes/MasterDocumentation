@@ -11,6 +11,9 @@
     <!-- В структуре подсвечивается только текущая глава: у обычного TreeViewItem подсветка
          выбранной строки складывалась с подсветкой текущей, и светились сразу две. -->
     <Style x:Key="OutlineItemStyle" TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+      <!-- Состояние ветки хранится в самом элементе структуры: перестроение списка после правки
+           текста больше не сворачивает то, что пользователь раскрыл. -->
+      <Setter Property="IsExpanded" Value="{Binding IsExpanded,Mode=TwoWay}" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="TreeViewItem">
@@ -108,7 +111,10 @@
         </StackPanel>
         <!-- Полоса прокрутки отключена: она забирает высоту у строки заголовка и обрезает вкладки,
              а весь список открытых документов доступен по кнопке переполнения справа. -->
-        <ListBox x:Name="Tabs" Grid.Column="1" ItemsSource="{Binding Tabs}" SelectedItem="{Binding SelectedTab,Mode=TwoWay}" SelectionChanged="Tabs_SelectionChanged" Background="Transparent" BorderThickness="0" Padding="0" VerticalAlignment="Center" ScrollViewer.HorizontalScrollBarVisibility="Hidden" ScrollViewer.VerticalScrollBarVisibility="Disabled" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+        <!-- Вкладки документов и вкладка настроек стоят в одном ряду: настройки не прячут список
+             документов, между ними можно переключаться одним щелчком. -->
+        <StackPanel x:Name="TabStrip" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" ClipToBounds="True" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+        <ListBox x:Name="Tabs" ItemsSource="{Binding Tabs}" SelectedItem="{Binding SelectedTab,Mode=TwoWay}" SelectionChanged="Tabs_SelectionChanged" Background="Transparent" BorderThickness="0" Padding="0" VerticalAlignment="Center" ScrollViewer.HorizontalScrollBarVisibility="Hidden" ScrollViewer.VerticalScrollBarVisibility="Disabled" shell:WindowChrome.IsHitTestVisibleInChrome="True">
           <ListBox.ItemContainerStyle>
             <!-- Контейнер не рисует собственную рамку: её рисует карточка вкладки,
                  иначе у выбранной вкладки получаются две обводки. -->
@@ -176,7 +182,7 @@
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
-        <Border x:Name="SettingsTabHeader" Grid.Column="1" Visibility="Collapsed" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Margin="6,0" Padding="10,0" Height="38" VerticalAlignment="Center" Width="210" HorizontalAlignment="Left" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+        <Border x:Name="SettingsTabHeader" Visibility="Collapsed" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Margin="3,0" Padding="8,0" Height="38" VerticalAlignment="Center" Width="185" HorizontalAlignment="Left" Cursor="Hand" MouseLeftButtonUp="SettingsTab_Click" ToolTip="Вкладка настроек" shell:WindowChrome.IsHitTestVisibleInChrome="True">
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto" />
@@ -185,9 +191,10 @@
             </Grid.ColumnDefinitions>
             <ui:AppIcon Kind="Settings" Width="16" Height="16" Foreground="{DynamicResource Accent/Hover}" VerticalAlignment="Center" />
             <TextBlock Grid.Column="1" Text="Настройки" Foreground="{DynamicResource Text/Primary}" FontWeight="SemiBold" Margin="9,0" VerticalAlignment="Center" />
-            <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="×" Width="25" Height="25" MinHeight="25" Click="Settings_Click" ToolTip="Закрыть настройки" />
+            <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="×" Width="25" Height="25" MinHeight="25" Click="CloseSettingsTab_Click" ToolTip="Закрыть настройки" />
           </Grid>
         </Border>
+        </StackPanel>
         <!-- Список открытых вкладок открывается из меню приложения: отдельная кнопка в строке
              заголовка рисовалась пустым квадратом (стиль IconButton показывает только текстовый
              значок) и мешала. -->
@@ -360,7 +367,7 @@
             </Grid>
           </StackPanel>
           <Grid Grid.Row="2">
-          <TreeView x:Name="Tree" ItemsSource="{Binding Nodes}" ContextMenuOpening="Tree_ContextMenuOpening" SelectedItemChanged="Tree_SelectedItemChanged" MouseDoubleClick="Tree_DoubleClick" AllowDrop="True" PreviewMouseRightButtonDown="Tree_PreviewMouseRightButtonDown" PreviewMouseLeftButtonUp="Tree_PreviewMouseLeftButtonUp" PreviewMouseMove="Tree_MouseMove" DragOver="Tree_DragOver" Drop="Tree_Drop" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Text/Primary}" Margin="8,0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto">
+          <TreeView x:Name="Tree" ItemsSource="{Binding Nodes}" ContextMenuOpening="Tree_ContextMenuOpening" SelectedItemChanged="Tree_SelectedItemChanged" MouseDoubleClick="Tree_DoubleClick" AllowDrop="True" PreviewMouseRightButtonDown="Tree_PreviewMouseRightButtonDown" PreviewMouseLeftButtonUp="Tree_PreviewMouseLeftButtonUp" PreviewMouseMove="Tree_MouseMove" DragOver="Tree_DragOver" DragLeave="Tree_DragLeave" Drop="Tree_Drop" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Text/Primary}" Margin="8,0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto">
             <TreeView.ItemContainerStyle>
               <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
                 <Setter Property="IsExpanded" Value="{Binding IsExpanded,Mode=TwoWay}" />
@@ -386,6 +393,8 @@
                 <MenuItem x:Name="FavoriteMenuItem" Header="Добавить в избранное" Click="FavoriteNode_Click" />
                 <MenuItem x:Name="MakeTemplateMenuItem" Header="Использовать как шаблон" Click="MakeTemplate_Click" />
                 <MenuItem x:Name="RenameMenuItem" Header="Переименовать" InputGestureText="F2" Click="Rename_Click" />
+                <!-- Выход из папки без второй папки: перетаскивать некуда, поэтому есть прямая команда. -->
+                <MenuItem x:Name="MoveUpMenuItem" Header="Переместить на уровень выше" Click="MoveNodeUp_Click" />
                 <Separator x:Name="ClipboardMenuSeparator" />
                 <MenuItem x:Name="CutMenuItem" Header="Вырезать" InputGestureText="Ctrl+X" Click="CutNode_Click" />
                 <MenuItem x:Name="CopyMenuItem" Header="Копировать" InputGestureText="Ctrl+C" Click="CopyNode_Click" />
@@ -410,6 +419,11 @@
             <TextBlock x:Name="TrashHintText" Visibility="Collapsed" VerticalAlignment="Bottom" Margin="12,0,12,8"
                        Text="Удалённое хранится 30 дней, затем удаляется окончательно."
                        Foreground="{DynamicResource Text/Muted}" FontSize="11" TextWrapping="Wrap" />
+            <!-- Полоса появляется, когда элемент тянут мимо строк: видно, что отпускание вынесет его в корень. -->
+            <Border x:Name="TreeRootDropHint" Visibility="Collapsed" IsHitTestVisible="False" VerticalAlignment="Bottom" Margin="8,0,8,8" Padding="10,7"
+                    Background="{DynamicResource Accent/Soft}" BorderBrush="{DynamicResource Accent/Primary}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}">
+              <TextBlock Text="Отпустите здесь — элемент выйдет в корень библиотеки" Foreground="{DynamicResource Text/Primary}" FontSize="11" TextWrapping="Wrap" TextAlignment="Center" />
+            </Border>
           </Grid>
           <StackPanel Grid.Row="3">
             <!-- Инструменты вынесены наружу: калькулятор и снимок экрана открываются одним нажатием. -->
@@ -610,13 +624,14 @@
                         <TextBlock Text="Текст:" Foreground="{DynamicResource Text/Muted}" VerticalAlignment="Center" Margin="5,0,8,0" />
                         <Button Style="{StaticResource IconButton}" Content="⎘" Tag="copyFormat" Click="ModernCommand_Click" ToolTip="Скопировать форматирование у курсора" />
                         <Button Style="{StaticResource IconButton}" Content="▣" Tag="applyFormat" Click="ModernCommand_Click" ToolTip="Применить скопированное форматирование к выделению" />
-                        <ComboBox Width="96" SelectedIndex="2" SelectionChanged="LetterSpacing_Changed" ToolTip="Межсимвольный интервал">
-                          <ComboBoxItem Content="−1 px" Tag="-1" />
-                          <ComboBoxItem Content="−0,5 px" Tag="-0.5" />
-                          <ComboBoxItem Content="Обычный" Tag="" />
-                          <ComboBoxItem Content="+0,5 px" Tag="0.5" />
-                          <ComboBoxItem Content="+1 px" Tag="1" />
-                          <ComboBoxItem Content="+2 px" Tag="2" />
+                        <!-- Подписи словами: «+2 px» ничего не говорило о том, что именно изменится. -->
+                        <ComboBox Width="164" SelectedIndex="2" SelectionChanged="LetterSpacing_Changed" ToolTip="Расстояние между буквами в выделенном тексте">
+                          <ComboBoxItem Content="Очень плотно" Tag="-1" ToolTip="Буквы ближе друг к другу на 1 точку" />
+                          <ComboBoxItem Content="Плотно" Tag="-0.5" ToolTip="Буквы ближе друг к другу на 0,5 точки" />
+                          <ComboBoxItem Content="Обычно" Tag="" ToolTip="Расстояние, заданное шрифтом" />
+                          <ComboBoxItem Content="Чуть шире" Tag="0.5" ToolTip="Буквы дальше друг от друга на 0,5 точки" />
+                          <ComboBoxItem Content="Шире" Tag="1" ToolTip="Буквы дальше друг от друга на 1 точку" />
+                          <ComboBoxItem Content="Разрежённо" Tag="2" ToolTip="Буквы дальше друг от друга на 2 точки" />
                         </ComboBox>
                         <Button Content="Абзац…" Click="ParagraphFormat_Click" ToolTip="Интервалы, отступы и направление текста" />
                         <Button Content="Список…" Click="ListFormat_Click" ToolTip="Буквенная, римская и другая нумерация" />

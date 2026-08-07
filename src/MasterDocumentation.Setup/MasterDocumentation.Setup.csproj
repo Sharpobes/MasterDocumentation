@@ -9,7 +9,7 @@
     <AssemblyName>MasterDocumentation-Setup</AssemblyName>
     <AssemblyTitle>Установка MasterDocumentation</AssemblyTitle>
     <Product>MasterDocumentation</Product>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>

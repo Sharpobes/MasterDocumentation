@@ -140,6 +140,9 @@ const updateCodeLanguages=editor=>{
 const WordLikeEditing=Extension.create({
   name:'wordLikeEditing',priority:1000,
   addKeyboardShortcuts(){return{
+    // Shift+Enter внутри таблицы работает как в Word: строка переносится в той же ячейке,
+    // а не создаёт новый абзац и не выкидывает курсор из таблицы.
+    'Shift-Enter':()=>(this.editor.isActive('tableCell')||this.editor.isActive('tableHeader'))&&this.editor.chain().focus().setHardBreak().run(),
     Backspace:()=>{
       const{empty,$from}=this.editor.state.selection
       if(!empty||$from.parentOffset!==0)return false
@@ -392,3 +395,26 @@ window.chrome?.webview?.addEventListener('message', event => {
 })
 post({type:'ready'})
 document.addEventListener('click',event=>{const spoiler=event.target.closest?.('[data-spoiler]');if(spoiler){spoiler.classList.toggle('revealed');event.preventDefault();return}const link=event.target.closest?.('a[href]');if(link){post({type:'openLink',href:link.getAttribute('href')||''});event.preventDefault()}})
+// Подсказка со ссылкой при наведении — как строка состояния в браузере: адрес виден целиком
+// в нижнем углу и не закрывает текст под курсором.
+const linkHint=document.createElement('div')
+linkHint.className='link-hint'
+linkHint.hidden=true
+document.body.append(linkHint)
+const readableLink=href=>{
+  const value=String(href||'')
+  if(!value.startsWith('masterdoc://'))return value
+  const rest=value.slice('masterdoc://'.length)
+  return rest.startsWith('document/')?`Документ приложения${rest.includes('#')?` · ${decodeURIComponent(rest.slice(rest.indexOf('#')+1))}`:''}`:value
+}
+const showLinkHint=href=>{
+  const text=readableLink(href)
+  if(!text){linkHint.hidden=true;return}
+  linkHint.textContent=text
+  linkHint.title=String(href||'')
+  linkHint.hidden=false
+}
+document.addEventListener('mouseover',event=>{const link=event.target.closest?.('a[href]');if(link){link.title=link.getAttribute('href')||'';showLinkHint(link.getAttribute('href'))}})
+document.addEventListener('mouseout',event=>{if(event.target.closest?.('a[href]'))showLinkHint('')})
+window.addEventListener('blur',()=>showLinkHint(''))
+window.addEventListener('scroll',()=>showLinkHint(''),true)

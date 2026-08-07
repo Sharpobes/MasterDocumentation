@@ -27,11 +27,19 @@ namespace MasterDocumentation.Views;
 public sealed class OutlineItem : INotifyPropertyChanged
 {
     private bool _isCurrent;
+    private bool _isExpanded=true;
     public EditorHeading Heading { get; }
     public string Text=>Heading.Text;
+    /// <summary>Путь от корня структуры. По нему после правки документа возвращается состояние веток.</summary>
+    public string Path { get; }
+    public OutlineItem? Parent { get; }
     public ObservableCollection<OutlineItem> Children { get; }=[];
     public bool IsCurrent { get=>_isCurrent; set{if(_isCurrent==value)return;_isCurrent=value;PropertyChanged?.Invoke(this,new(nameof(IsCurrent)));} }
-    public OutlineItem(EditorHeading heading)=>Heading=heading;
+    public bool IsExpanded { get=>_isExpanded; set{if(_isExpanded==value)return;_isExpanded=value;PropertyChanged?.Invoke(this,new(nameof(IsExpanded)));} }
+    public OutlineItem(EditorHeading heading,OutlineItem? parent)
+    {
+        Heading=heading;Parent=parent;Path=(parent is null?"":parent.Path+" › ")+heading.Level+":"+heading.Text;
+    }
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 
@@ -54,6 +62,10 @@ public partial class MainWindow : Window
     private bool _structurePanelCollapsed;
     private bool _propertiesPanelCollapsed;
     private ObservableCollection<OutlineItem> _outlineRoots=[];
+    private IReadOnlyList<EditorHeading> _outlineHeadings=[];
+    private readonly HashSet<string> _collapsedOutlinePaths=[];
+    private long _collapsedOutlineDocumentId=-1;
+    private string _currentOutlinePath="";
     /// <summary>Минимальная ширина панели свойств: ниже неё подписи и поле состояния обрезаются.</summary>
     private const double PropertiesMinWidth=280;
     /// <summary>Минимальная ширина библиотеки: ниже неё обрезается подпись кнопки создания.</summary>
@@ -279,8 +291,10 @@ public partial class MainWindow : Window
         _tabDragStart=e.GetPosition(Tabs);
         _draggedTab=TabFromSource(e.OriginalSource as DependencyObject);
         // Щелчок по уже выбранной вкладке не меняет выбор и не вызывает Tabs_SelectionChanged,
-        // поэтому возврат с главной страницы делается здесь.
-        if(_startPageVisible&&_draggedTab is not null&&ReferenceEquals(_draggedTab,_vm.SelectedTab))HideStartPage();
+        // поэтому возврат с главной страницы и из настроек делается здесь.
+        if(_draggedTab is null)return;
+        if(SettingsHost.Visibility==Visibility.Visible&&ReferenceEquals(_draggedTab,_vm.SelectedTab)){ShowSelectedTab(true);return;}
+        if(_startPageVisible&&ReferenceEquals(_draggedTab,_vm.SelectedTab))HideStartPage();
     }
     private void Tabs_PreviewMouseMove(object sender,MouseEventArgs e)
     {
@@ -315,11 +329,13 @@ public partial class MainWindow : Window
     /// </summary>
     private void Home_Click(object sender,RoutedEventArgs e)
     {
+        // Уход на главную только прячет вкладку настроек: правки в ней остаются, спрашивать о
+        // сохранении здесь незачем — это переключение вкладок, а не закрытие.
         if(SettingsHost.Visibility==Visibility.Visible)
         {
-            if(_settingsView?.RequestClose()==false)return;
-            HideSettings();
-            if(_vm.SelectedTab is null)return;
+            DeactivateSettings();
+            if(_vm.SelectedTab is null)ShowSelectedTab();else ShowStartPage();
+            return;
         }
         if(_startPageVisible){HideStartPage();return;}
         if(_vm.SelectedTab is null){LoadStartPage();return;}
@@ -352,6 +368,7 @@ public partial class MainWindow : Window
     }
     private void ShowSelectedTab(bool focusEditor=false,string focusPosition="end")
     {
+        DeactivateSettings();
         _loading = true;
         _startPageVisible = false;
         if (_vm.SelectedTab is null)
@@ -360,6 +377,9 @@ public partial class MainWindow : Window
             ModernEditor.Visibility = Visibility.Collapsed;
             EmptyHint.Visibility = Visibility.Visible;
             DocumentHeader.Visibility = Visibility.Collapsed;
+            _outlineRoots = [];
+            _outlineHeadings = [];
+            _currentOutlinePath = "";
             StructureTree.ItemsSource = null;
             HeadersList.ItemsSource = null;
             SetOutlineEmptyState(true);
@@ -374,6 +394,9 @@ public partial class MainWindow : Window
             DocumentHeader.Visibility = Visibility.Visible;
             _outlineSignature = "";
             _outlineDocumentId = _vm.SelectedTab.DocumentId;
+            _outlineRoots = [];
+            _outlineHeadings = [];
+            _currentOutlinePath = "";
             StructureTree.ItemsSource = null;
             HeadersList.ItemsSource = null;
             SetOutlineEmptyState(true);
@@ -604,11 +627,30 @@ public partial class MainWindow : Window
     private void UpdateOutline(long documentId,IReadOnlyList<EditorHeading> headings)
     {
         var signature=string.Join('\u001f',headings.Select(x=>$"{x.Level}:{x.Position}:{x.Text}"));if(_outlineDocumentId==documentId&&_outlineSignature==signature)return;_outlineDocumentId=documentId;_outlineSignature=signature;
+        if(_collapsedOutlineDocumentId!=documentId){_collapsedOutlinePaths.Clear();_collapsedOutlineDocumentId=documentId;}
         var roots=new ObservableCollection<OutlineItem>();var stack=new Stack<(int Level,OutlineItem Item)>();
-        foreach(var heading in headings){while(stack.Count>0&&stack.Peek().Level>=heading.Level)stack.Pop();var item=new OutlineItem(heading);if(stack.Count==0)roots.Add(item);else stack.Peek().Item.Children.Add(item);stack.Push((heading.Level,item));}
-        _outlineRoots=roots;StructureTree.ItemsSource=roots;HeadersList.ItemsSource=headings;
+        foreach(var heading in headings)
+        {
+            while(stack.Count>0&&stack.Peek().Level>=heading.Level)stack.Pop();
+            var parent=stack.Count==0?null:stack.Peek().Item;
+            var item=new OutlineItem(heading,parent);
+            item.IsExpanded=!_collapsedOutlinePaths.Contains(item.Path);
+            item.PropertyChanged+=OutlineItem_PropertyChanged;
+            if(parent is null)roots.Add(item);else parent.Children.Add(item);
+            stack.Push((heading.Level,item));
+        }
+        _outlineRoots=roots;_outlineHeadings=headings;StructureTree.ItemsSource=roots;HeadersList.ItemsSource=headings;
         SetOutlineEmptyState(headings.Count==0);
     }
+    private void OutlineItem_PropertyChanged(object? sender,PropertyChangedEventArgs e)
+    {
+        if(e.PropertyName!=nameof(OutlineItem.IsExpanded)||sender is not OutlineItem item)return;
+        if(item.IsExpanded)_collapsedOutlinePaths.Remove(item.Path);else _collapsedOutlinePaths.Add(item.Path);
+    }
+    /// <summary>
+    /// Курсор в тексте задаёт текущую главу в обеих панелях: она подсвечивается и, если ушла за
+    /// границы видимой области, прокручивается к себе — искать её в списке вручную не нужно.
+    /// </summary>
     private void UpdateCurrentOutlineItem(int position)
     {
         var flat=new List<OutlineItem>();
@@ -616,6 +658,31 @@ public partial class MainWindow : Window
         Visit(_outlineRoots);
         var current=flat.Where(item=>item.Heading.Position<=position).OrderBy(item=>item.Heading.Position).LastOrDefault();
         foreach(var item in flat)item.IsCurrent=ReferenceEquals(item,current);
+        if(current is null){_currentOutlinePath="";HeadersList.SelectedItem=null;return;}
+        var heading=_outlineHeadings.FirstOrDefault(x=>x.Position==current.Heading.Position&&x.Text==current.Heading.Text);
+        if(heading is not null&&!ReferenceEquals(HeadersList.SelectedItem,heading))
+        {
+            HeadersList.SelectedItem=heading;
+            if(HeadersList.Visibility==Visibility.Visible)HeadersList.ScrollIntoView(heading);
+        }
+        // Ветки раскрываются и панель прокручивается только при переходе к другой главе: иначе
+        // свёрнутый раздел распахивался бы снова на каждом движении курсора внутри него.
+        if(_currentOutlinePath==current.Path)return;
+        _currentOutlinePath=current.Path;
+        for(var ancestor=current.Parent;ancestor is not null;ancestor=ancestor.Parent)ancestor.IsExpanded=true;
+        if(StructureTree.Visibility==Visibility.Visible)
+            Dispatcher.BeginInvoke(new Action(()=>OutlineContainer(StructureTree,current)?.BringIntoView()),System.Windows.Threading.DispatcherPriority.Background);
+    }
+    private static TreeViewItem? OutlineContainer(ItemsControl parent,OutlineItem target)
+    {
+        foreach(var item in parent.Items)
+        {
+            if(parent.ItemContainerGenerator.ContainerFromItem(item) is not TreeViewItem container)continue;
+            if(ReferenceEquals(item,target))return container;
+            container.UpdateLayout();
+            if(OutlineContainer(container,target) is TreeViewItem found)return found;
+        }
+        return null;
     }
     private void SetOutlineEmptyState(bool isEmpty)
     {
@@ -706,6 +773,12 @@ public partial class MainWindow : Window
         FavoriteMenuItem.Visibility=documentOutsideTrash?Visibility.Visible:Visibility.Collapsed;
         if(documentOutsideTrash)FavoriteMenuItem.Header=IsFavorite(node!.Id)?"Убрать из избранного":"Добавить в избранное";
         RenameMenuItem.Visibility=hasNode&&!inTrash?Visibility.Visible:Visibility.Collapsed;
+        MoveUpMenuItem.Visibility=hasNode&&!inTrash&&node!.ParentId is not null?Visibility.Visible:Visibility.Collapsed;
+        if(MoveUpMenuItem.Visibility==Visibility.Visible)
+        {
+            var grandParent=_vm.Database.FindNode(node!.ParentId!.Value)?.ParentId;
+            MoveUpMenuItem.Header=grandParent is null?"Вынести в корень":"Переместить на уровень выше";
+        }
         var clipboardAvailable=!inTrash;
         ClipboardMenuSeparator.Visibility=clipboardAvailable?Visibility.Visible:Visibility.Collapsed;
         CutMenuItem.Visibility=hasNode&&!inTrash?Visibility.Visible:Visibility.Collapsed;
@@ -735,10 +808,37 @@ public partial class MainWindow : Window
     /// </summary>
     private void Tree_PreviewMouseLeftButtonUp(object sender,MouseButtonEventArgs e)
     {
-        if((ItemsControl.ContainerFromElement(Tree,e.OriginalSource as DependencyObject) as TreeViewItem)?.DataContext is not NodeItem node)return;
+        if((ItemsControl.ContainerFromElement(Tree,e.OriginalSource as DependencyObject) as TreeViewItem)?.DataContext is not NodeItem node)
+        {
+            // Щелчок по пустому месту снимает выбор: без этого новый документ или вставка всегда
+            // попадали в последнюю выбранную папку, и выйти из неё было нечем.
+            if((e.GetPosition(Tree)-_dragStart).Length<8)ClearTreeSelection();
+            return;
+        }
         if(node.IsFolder||(e.GetPosition(Tree)-_dragStart).Length>=8)return;
         _vm.Open(node);
         ShowSelectedTab();
+    }
+    private void ClearTreeSelection()
+    {
+        static void Visit(ItemsControl parent)
+        {
+            foreach(var item in parent.Items)
+            {
+                if(parent.ItemContainerGenerator.ContainerFromItem(item) is not TreeViewItem container)continue;
+                if(container.IsSelected)container.IsSelected=false;
+                Visit(container);
+            }
+        }
+        Visit(Tree);
+        _vm.SelectedNode=null;
+        UpdateNavigationSelection();
+    }
+    /// <summary>Переносит элемент к родителю его папки — выход из вложенной папки без второй папки рядом.</summary>
+    private void MoveNodeUp_Click(object sender,RoutedEventArgs e)
+    {
+        if(_vm.SelectedNode is not{ParentId: not null} node)return;
+        MoveNode(node.Id,_vm.Database.FindNode(node.ParentId.Value)?.ParentId,node.ParentId);
     }
     private void Tree_PreviewMouseRightButtonDown(object sender,MouseButtonEventArgs e)
     {
@@ -838,11 +938,16 @@ public partial class MainWindow : Window
         SaveAttachmentButton.IsEnabled=selected;
         RemoveAttachmentButton.IsEnabled=selected;
     }
+    /// <summary>
+    /// Двойной щелчок ведёт к месту вложения в тексте — предпросмотр остался за своей кнопкой,
+    /// иначе одно и то же действие висело сразу на двух жестах.
+    /// </summary>
     private void AttachmentList_DoubleClick(object sender,MouseButtonEventArgs e)
     {
         if(AttachmentList.SelectedItem is not AttachmentInfo item)return;
-        if(PreviewKindOf(item.FileName)!=AttachmentPreviewKind.None)ShowAttachmentPreview(item);
-        else OpenAttachment_Click(sender,new RoutedEventArgs());
+        if(!item.MimeType.StartsWith("image/",StringComparison.OrdinalIgnoreCase)){OpenAttachment_Click(sender,new RoutedEventArgs());return;}
+        if(MessageBox.Show(this,$"Перейти к «{item.FileName}» в тексте документа?","Вложение",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
+        SelectAttachmentInDocument(item);
     }
     private static bool IsImage(string fileName,string mime)=>
         mime.StartsWith("image/",StringComparison.OrdinalIgnoreCase)||
@@ -1282,7 +1387,7 @@ public partial class MainWindow : Window
     }
     private static double? JsonNumber(JsonElement state,string name)=>state.TryGetProperty(name,out var value)&&value.ValueKind==JsonValueKind.Number&&value.TryGetDouble(out var number)?number:null;
     private async void LetterSpacing_Changed(object sender,SelectionChangedEventArgs e){if(_updatingToolbarState||ModernEditor is null||sender is not ComboBox{SelectedItem:ComboBoxItem item})return;double? value=null;if(!string.IsNullOrWhiteSpace(item.Tag?.ToString())&&double.TryParse(item.Tag!.ToString(),System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out var parsed))value=parsed;await ModernEditor.ExecuteAsync("letterSpacing",new{value});}
-    private async void ParagraphFormat_Click(object sender,RoutedEventArgs e){var dialog=new ParagraphFormatDialog(_spaceBefore,_spaceAfter,_firstIndent,_leftIndent,_rightIndent,_textDirection){Owner=this};if(dialog.ShowDialog()!=true)return;await ModernEditor.ExecuteAsync("paragraphLayout",new{spaceBefore=dialog.SpaceBefore,spaceAfter=dialog.SpaceAfter,firstIndent=dialog.FirstIndent,leftIndent=dialog.LeftIndent,rightIndent=dialog.RightIndent,textDirection=dialog.TextDirection});AdvancedToggle.IsChecked=false;}
+    private async void ParagraphFormat_Click(object sender,RoutedEventArgs e){var dialog=new ParagraphFormatDialog(_spaceBefore,_spaceAfter,_firstIndent,_leftIndent,_rightIndent,_textDirection,_settings.MeasurementUnits){Owner=this};if(dialog.ShowDialog()!=true)return;await ModernEditor.ExecuteAsync("paragraphLayout",new{spaceBefore=dialog.SpaceBefore,spaceAfter=dialog.SpaceAfter,firstIndent=dialog.FirstIndent,leftIndent=dialog.LeftIndent,rightIndent=dialog.RightIndent,textDirection=dialog.TextDirection});AdvancedToggle.IsChecked=false;}
     private async void ListFormat_Click(object sender,RoutedEventArgs e){var dialog=new ListFormatDialog{Owner=this};if(dialog.ShowDialog()!=true)return;await ModernEditor.ExecuteAsync("listOptions",new{kind=dialog.Kind,style=dialog.ListStyle,start=dialog.Start});AdvancedToggle.IsChecked=false;}
     private async void TextDirection_Click(object sender,RoutedEventArgs e){if(sender is not FrameworkElement{Tag:string direction})return;await ModernEditor.ExecuteAsync("textDirection",new{direction});}
     private void HighlightCodeBlocks()
@@ -1513,6 +1618,7 @@ public partial class MainWindow : Window
         {
             if (_dragGhost is not null) { AdornerLayer.GetAdornerLayer(Tree)?.Remove(_dragGhost); _dragGhost = null; }
             _dragNode = null;
+            TreeRootDropHint.Visibility = Visibility.Collapsed;
         }
     }
     protected override void OnPreviewMouseLeftButtonDown(MouseButtonEventArgs e) { _dragStart = e.GetPosition(Tree); _dragNode = (ItemsControl.ContainerFromElement(Tree, e.OriginalSource as DependencyObject) as TreeViewItem)?.DataContext as NodeItem; base.OnPreviewMouseLeftButtonDown(e); }
@@ -1520,12 +1626,26 @@ public partial class MainWindow : Window
     private void Tree_DragOver(object sender, DragEventArgs e)
     {
         _dragGhost?.MoveTo(e.GetPosition(Tree));
-        e.Effects = e.Data.GetDataPresent(typeof(NodeItem)) ? DragDropEffects.Move : DragDropEffects.None;
+        var dragging = e.Data.GetDataPresent(typeof(NodeItem));
+        e.Effects = dragging ? DragDropEffects.Move : DragDropEffects.None;
+        var toRoot = dragging && TreeItemAt(e.GetPosition(Tree)) is null && e.Data.GetData(typeof(NodeItem)) is NodeItem { ParentId: not null };
+        TreeRootDropHint.Visibility = toRoot ? Visibility.Visible : Visibility.Collapsed;
         e.Handled = true;
     }
+    private void Tree_DragLeave(object sender, DragEventArgs e) => TreeRootDropHint.Visibility = Visibility.Collapsed;
+    /// <summary>Строка дерева под точкой; null — щелчок или отпускание пришлись на пустое место панели.</summary>
+    private NodeItem? TreeItemAt(Point point)
+    {
+        var element = Tree.InputHitTest(point) as DependencyObject;
+        while (element is not null && element is not TreeViewItem) element = VisualTreeHelper.GetParent(element);
+        return (element as TreeViewItem)?.DataContext as NodeItem;
+    }
+    // Перенос мимо строк выносит элемент в корень: иначе из единственной папки его некуда деть.
     private void Tree_Drop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData(typeof(NodeItem)) is not NodeItem source) return; var element = Tree.InputHitTest(e.GetPosition(Tree)) as DependencyObject; while (element is not null && element is not TreeViewItem) element = VisualTreeHelper.GetParent(element); var target = (element as TreeViewItem)?.DataContext as NodeItem;
+        TreeRootDropHint.Visibility = Visibility.Collapsed;
+        if (e.Data.GetData(typeof(NodeItem)) is not NodeItem source) return;
+        var target = TreeItemAt(e.GetPosition(Tree));
         var parent = target?.IsFolder == true ? target.Id : target?.ParentId; if (parent == source.Id || IsDescendant(source, parent)) { MessageBox.Show("Нельзя переместить папку внутрь самой себя."); return; }
         if (parent == source.ParentId) return;
         MoveNode(source.Id, parent, source.ParentId);
@@ -1947,7 +2067,7 @@ public partial class MainWindow : Window
         // Close() while WPF is still inside Window.InternalClose.
         e.Cancel=true;
         if(_closeInProgress)return;
-        if(_settingsView is not null&&SettingsHost.Visibility==Visibility.Visible&&!_settingsView.RequestClose())return;
+        if(_settingsView is not null&&!_settingsView.RequestClose())return;
 
         _closeInProgress=true;
         _saveTimer.Stop();_draftTimer.Stop();
@@ -2036,13 +2156,49 @@ public partial class MainWindow : Window
         else
             SystemCommands.MaximizeWindow(this);
     }
+    /// <summary>
+    /// Настройки живут отдельной вкладкой рядом с документами: повторный вызов из меню или по
+    /// горячей клавише прячет их, но сама вкладка остаётся — переключение между настройками и
+    /// документом не требует их закрывать и не теряет несохранённые правки.
+    /// </summary>
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        if(SettingsHost.Visibility==Visibility.Visible){if(_settingsView?.RequestClose()!=false)HideSettings();return;}
+        if(SettingsHost.Visibility==Visibility.Visible){DeactivateSettings();ShowSelectedTab();return;}
+        if(_settingsView is null)
+        {
+            _settingsView=new SettingsView(_vm.Database,_vm.Backups,_settingsService);
+            _settingsView.SettingsSaved+=ApplySavedSettings;
+            _settingsView.CloseRequested+=HideSettings;
+            SettingsHost.Content=_settingsView;
+            SettingsTabHeader.Visibility=Visibility.Visible;
+        }
+        ActivateSettings();
+    }
+    private void SettingsTab_Click(object sender,MouseButtonEventArgs e){if(SettingsHost.Visibility!=Visibility.Visible)ActivateSettings();}
+    private void CloseSettingsTab_Click(object sender,RoutedEventArgs e){if(_settingsView?.RequestClose()==false)return;HideSettings();}
+    private void ActivateSettings()
+    {
+        if(_settingsView is null)return;
         _vm.SaveAll();
         ModernEditor.SetBrowserVisible(false);ModernEditor.Visibility=Visibility.Collapsed;Editor.Visibility=Visibility.Collapsed;EmptyHint.Visibility=Visibility.Collapsed;
         TabsOverflowPopup.IsOpen=false;
-        _settingsView=new SettingsView(_vm.Database,_vm.Backups,_settingsService);_settingsView.SettingsSaved+=ApplySavedSettings;_settingsView.CloseRequested+=HideSettings;SettingsHost.Content=_settingsView;SettingsHost.Visibility=Visibility.Visible;Tabs.Visibility=Visibility.Collapsed;SettingsTabHeader.Visibility=Visibility.Visible;Dispatcher.BeginInvoke(new Action(UpdateSettingsHostSize));
+        SettingsHost.Visibility=Visibility.Visible;
+        UpdateSettingsTabState();
+        Dispatcher.BeginInvoke(new Action(UpdateSettingsHostSize));
+    }
+    private void DeactivateSettings()
+    {
+        if(SettingsHost.Visibility!=Visibility.Visible)return;
+        SettingsHost.Visibility=Visibility.Collapsed;
+        UpdateSettingsTabState();
+    }
+    private void UpdateSettingsTabState()
+    {
+        var active=SettingsHost.Visibility==Visibility.Visible;
+        SettingsTabHeader.SetResourceReference(BackgroundProperty,active?"Background/Selected":"Background/SurfaceElevated");
+        SettingsTabHeader.SetResourceReference(Border.BorderBrushProperty,active?"Accent/Primary":"Border/Default");
+        // Место под вкладку настроек забирается у ряда документов, иначе она уезжает под поиск.
+        Tabs.MaxWidth=SettingsTabHeader.Visibility==Visibility.Visible?520:720;
     }
     private void ApplySavedSettings(ApplicationSettings settings){_settings=settings;LocalizationService.SetLanguage(_settings.Language);LocalizationService.Apply(this);ApplyInterfacePreferences(_settings);_saveTimer.Interval=TimeSpan.FromSeconds(_settings.AutoSaveDelaySeconds);_vm.SetTheme(_settings.Theme,false);_=ModernEditor.ExecuteAsync("setTheme",new{theme=_vm.DarkTheme?"dark":"light"});_=ModernEditor.ExecuteAsync("setLanguage",new{language=LocalizationService.IsEnglish?"en":"ru"});Editor.FontFamily=new FontFamily(_settings.DefaultFont);Editor.FontSize=_settings.DefaultFontSize;Editor.SpellCheck.IsEnabled=_settings.SpellCheck;}
     private void SettingsHost_SizeChanged(object sender,SizeChangedEventArgs e)=>UpdateSettingsHostSize();
@@ -2062,7 +2218,7 @@ public partial class MainWindow : Window
         }
         ToolTipService.SetIsEnabled(this,settings.ShowTooltips);
     }
-    private void HideSettings(){SettingsHost.Visibility=Visibility.Collapsed;SettingsHost.Content=null;_settingsView=null;SettingsTabHeader.Visibility=Visibility.Collapsed;Tabs.Visibility=Visibility.Visible;ShowSelectedTab(true);ModernEditor.SetBrowserVisible(true);}
+    private void HideSettings(){SettingsHost.Visibility=Visibility.Collapsed;SettingsHost.Content=null;_settingsView=null;SettingsTabHeader.Visibility=Visibility.Collapsed;UpdateSettingsTabState();ShowSelectedTab(true);ModernEditor.SetBrowserVisible(true);}
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if(e.Key==Key.Escape&&CloseTransientSurface()){}
@@ -2097,7 +2253,7 @@ public partial class MainWindow : Window
     {
         if(CreateMenuPopup.IsOpen){CreateMenuPopup.IsOpen=false;return true;}
         if(AttachmentPreviewOverlay.Visibility==Visibility.Visible){CloseAttachmentPreview();return true;}
-        if(SettingsHost.Visibility==Visibility.Visible){if(_settingsView?.RequestClose()!=false)HideSettings();return true;}
+        if(SettingsHost.Visibility==Visibility.Visible){DeactivateSettings();ShowSelectedTab();return true;}
         if(_startPageVisible&&_vm.SelectedTab is not null){HideStartPage();return true;}
         if(AttachmentsPanel.Visibility==Visibility.Visible){PropertiesTab_Click(this,new RoutedEventArgs());return true;}
         if(_focusMode){ToggleFocusMode();return true;}
