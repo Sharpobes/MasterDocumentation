@@ -48,7 +48,14 @@ jobs:
         env:
           SIGNING_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE }}
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
-        # Секреты подписи необязательны: без них скрипт собирает неподписанные файлы.
+          TRUSTED_SIGNING_ENDPOINT: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+          TRUSTED_SIGNING_ACCOUNT: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+          TRUSTED_SIGNING_PROFILE: ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        # Секреты подписи необязательны: без них скрипт собирает неподписанные файлы
+        # (Windows покажет предупреждение SmartScreen — см. docs/CODE_SIGNING.md).
         # Вывод дублируется в файл и при сбое печатается аннотацией: логи запуска доступны
         # только с токеном, а аннотация видна и через публичный API.
         run: |

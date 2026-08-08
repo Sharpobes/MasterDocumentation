@@ -120,6 +120,8 @@ dotnet test MasterDocumentation.sln -c Release --no-build
 
 Результат появится в `artifacts/`: `MasterDocumentation-v1.5.0-win-x64.zip`, `MasterDocumentation-Setup-v1.5.0.exe` и файлы `.sha256`. Установщик — это `MasterDocumentation.Setup` (WPF), к которому в конец EXE дописан портативный архив: `[ZIP][длина Int64][сигнатура MDSETUP1]`. Ключ `-SkipInstaller` собирает только архив, `-SkipTests` пропускает тесты. GitHub Actions выполняет те же шаги при отправке тега `v*`.
 
+Подпись кода (без неё Windows показывает SmartScreen, а Smart App Control блокирует запуск) включается ключами `-CertificatePath`/`-CertificateThumbprint` или параметрами Trusted Signing; `-RequireSignature` не даёт собрать неподписанный выпуск. Подробности — в [docs/CODE_SIGNING.md](docs/CODE_SIGNING.md).
+
 ## Выпуск новой версии
 
 ```powershell
