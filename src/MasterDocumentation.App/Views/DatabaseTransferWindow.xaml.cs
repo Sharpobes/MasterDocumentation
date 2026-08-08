@@ -18,6 +18,9 @@ public partial class DatabaseTransferWindow : Window
     private readonly DatabaseService _database;
     private StorageProviderConfig _config;
     private bool _busy;
+    /// <summary>Файлы, не доехавшие при последнем переносе, и направление, в котором их нужно доложить.</summary>
+    private List<string> _pendingAssets = [];
+    private bool _pendingAssetsFromRemote;
 
     /// <summary>Истина, если в текущее хранилище были импортированы документы и дерево нужно перечитать.</summary>
     public bool LibraryChanged { get; private set; }
@@ -57,7 +60,7 @@ public partial class DatabaseTransferWindow : Window
 
     private IDocumentStore CreateRemoteStore()
     {
-        if (ConnectionString.Length == 0) throw new InvalidOperationException("Укажите строку подключения к базе данных.");
+        PostgresConnectionString.Validate(ConnectionString);
         return new PostgresDocumentStore(ConnectionString);
     }
 
@@ -65,9 +68,9 @@ public partial class DatabaseTransferWindow : Window
     {
         ApplyUserName();
         var config = new StorageProviderConfig { Provider = StorageProviderKind.Postgres, PostgresConnectionString = ConnectionString };
-        if (config.PostgresConnectionString.Length == 0) { StatusText.Text = "Укажите строку подключения."; return; }
-        StatusText.Text = StorageConfigService.TestConnection(config, out var error)
-            ? "Соединение установлено."
+        if (!PostgresConnectionString.TryValidate(config.PostgresConnectionString, out var invalid)) { StatusText.Text = invalid; return; }
+        StatusText.Text = StorageConfigService.TestConnection(config, out var error, out var databaseMissing, out _)
+            ? (databaseMissing ? "Сервер доступен, база ещё не создана — она и все таблицы будут созданы автоматически при первом переносе или запуске." : "Соединение установлено.")
             : "Не удалось подключиться: " + error;
     }
 
@@ -140,10 +143,9 @@ public partial class DatabaseTransferWindow : Window
         {
             var target = CreateRemoteStore();
             var progress = new Progress<string>(text => Dispatcher.Invoke(() => StatusText.Text = text));
-            StorageMigrationService.CopySelected(_database, target, ids, isPrivate ? true : null, progress);
-            return (object?)null;
+            return StorageMigrationService.CopySelected(_database, target, ids, isPrivate ? true : null, progress);
         },
-        _ => StatusText.Text = $"Готово: документов сохранено в базу — {ids.Count}.");
+        result => ShowReport((MigrationReport)result!, "Выгрузка в базу данных"));
     }
 
     private async void Import_Click(object sender, RoutedEventArgs e)
@@ -158,15 +160,45 @@ public partial class DatabaseTransferWindow : Window
             var source = CreateRemoteStore();
             source.Initialize();
             var progress = new Progress<string>(text => Dispatcher.Invoke(() => StatusText.Text = text));
-            StorageMigrationService.CopySelected(source, _database, ids, null, progress);
-            return (object?)null;
+            return StorageMigrationService.CopySelected(source, _database, ids, null, progress);
         },
-        _ =>
+        result =>
         {
             LibraryChanged = true;
             LoadLocalTree();
-            StatusText.Text = $"Готово: импортировано документов — {ids.Count}.";
+            ShowReport((MigrationReport)result!, "Импорт из базы данных");
         });
+    }
+
+    /// <summary>
+    /// Итог переноса. Если часть изображений и вложений не доехала, показывается подробный
+    /// отчёт с причиной и включается кнопка повторного переноса только файлов.
+    /// </summary>
+    private void ShowReport(MigrationReport report, string title)
+    {
+        StatusText.Text = report.Summary();
+        _pendingAssets = report.FailedAssetNames.ToList();
+        _pendingAssetsFromRemote = title.StartsWith("Импорт", StringComparison.Ordinal);
+        RetryAssetsButton.Visibility = _pendingAssets.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        RetryAssetsButton.Content = $"Повторить перенос изображений ({_pendingAssets.Count})";
+        if (report.HasFailures) MessageBox.Show(this, report.Details(), title, MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    private async void RetryAssets_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy || _pendingAssets.Count == 0) return;
+        ApplyUserName();
+        var names = _pendingAssets.ToList();
+        var fromRemote = _pendingAssetsFromRemote;
+        await RunAsync("Повторный перенос изображений…", () =>
+        {
+            var remote = CreateRemoteStore();
+            var progress = new Progress<string>(text => Dispatcher.Invoke(() => StatusText.Text = text));
+            return fromRemote
+                ? StorageMigrationService.CopyAssets(remote, _database, names, progress)
+                : StorageMigrationService.CopyAssets(_database, remote, names, progress);
+        },
+        result => ShowReport((MigrationReport)result!, fromRemote ? "Импорт из базы данных" : "Выгрузка в базу данных"));
     }
 
     private async Task RunAsync(string title, Func<object?> operation, Action<object?> onSuccess)
@@ -174,6 +206,7 @@ public partial class DatabaseTransferWindow : Window
         _busy = true;
         UploadButton.IsEnabled = false;
         ImportButton.IsEnabled = false;
+        RetryAssetsButton.IsEnabled = false;
         StatusText.Text = title;
         System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
         try
@@ -184,14 +217,15 @@ public partial class DatabaseTransferWindow : Window
         catch (Exception ex)
         {
             LogService.Error(title, ex);
-            StatusText.Text = "Ошибка: " + ex.Message;
-            MessageBox.Show(this, ex.Message, "База данных", MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusText.Text = "Ошибка: " + PostgresErrorInfo.Short(ex);
+            MessageBox.Show(this, PostgresErrorInfo.Detailed(ex), "База данных", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
             System.Windows.Input.Mouse.OverrideCursor = null;
             UploadButton.IsEnabled = true;
             ImportButton.IsEnabled = true;
+            RetryAssetsButton.IsEnabled = true;
             _busy = false;
         }
     }

@@ -36,7 +36,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
 
     public PostgresDocumentStore(string connectionString)
     {
-        if (string.IsNullOrWhiteSpace(connectionString)) throw new ArgumentException("Не указана строка подключения к PostgreSQL.");
+        PostgresConnectionString.Validate(connectionString);
         _connectionString = connectionString;
     }
 
@@ -65,16 +65,21 @@ public sealed class PostgresDocumentStore : IDocumentStore
 
     public void Initialize()
     {
+        // База может ещё не существовать: приложению достаточно строки подключения — базу,
+        // расширения, таблицы и индексы оно создаёт само.
+        PostgresProvisioning.EnsureDatabase(_connectionString);
         using var connection = Open();
+        // CITEXT (регистронезависимые названия, аналог COLLATE NOCASE) ставится, если позволяют
+        // права; иначе схема создаётся на TEXT и остаётся полностью рабочей.
+        var ci = PostgresProvisioning.EnsureExtension(connection, "citext") ? "CITEXT" : "TEXT";
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = """
-                CREATE EXTENSION IF NOT EXISTS citext;
+            command.CommandText = $"""
                 CREATE TABLE IF NOT EXISTS Nodes(
                   Id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                   ParentId BIGINT NULL REFERENCES Nodes(Id) ON DELETE CASCADE,
                   IsFolder BOOLEAN NOT NULL,
-                  Title CITEXT NOT NULL,
+                  Title {ci} NOT NULL,
                   SortOrder INTEGER NOT NULL DEFAULT 0,
                   CreatedAt TEXT NOT NULL,
                   ModifiedAt TEXT NOT NULL,
@@ -82,7 +87,6 @@ public sealed class PostgresDocumentStore : IDocumentStore
                   PlainText TEXT NOT NULL DEFAULT ''
                 );
                 CREATE INDEX IF NOT EXISTS IX_Nodes_Parent ON Nodes(ParentId, SortOrder);
-                CREATE TABLE IF NOT EXISTS Settings(Key TEXT PRIMARY KEY, Value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS SchemaMigrations(Version INTEGER PRIMARY KEY, AppliedAt TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS DocumentVersions(
                   Id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -95,10 +99,10 @@ public sealed class PostgresDocumentStore : IDocumentStore
                   FileName TEXT NOT NULL, StoredName TEXT NOT NULL, MimeType TEXT NOT NULL, Size BIGINT NOT NULL, Sha256 TEXT NOT NULL, CreatedAt TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS IX_Attachments_Document ON Attachments(DocumentId, CreatedAt DESC);
                 CREATE INDEX IF NOT EXISTS IX_Attachments_Hash ON Attachments(Sha256);
-                CREATE TABLE IF NOT EXISTS Tags(Id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY, Name CITEXT NOT NULL UNIQUE);
+                CREATE TABLE IF NOT EXISTS Tags(Id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY, Name {ci} NOT NULL UNIQUE);
                 CREATE TABLE IF NOT EXISTS DocumentTags(DocumentId BIGINT NOT NULL REFERENCES Nodes(Id) ON DELETE CASCADE, TagId BIGINT NOT NULL REFERENCES Tags(Id) ON DELETE CASCADE, PRIMARY KEY(DocumentId,TagId));
                 CREATE TABLE IF NOT EXISTS CustomProperties(Id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY, DocumentId BIGINT NOT NULL REFERENCES Nodes(Id) ON DELETE CASCADE, Name TEXT NOT NULL, Value TEXT NOT NULL, UNIQUE(DocumentId,Name));
-                CREATE TABLE IF NOT EXISTS Statuses(Name CITEXT PRIMARY KEY, SortOrder INTEGER NOT NULL DEFAULT 0, IsBuiltIn BOOLEAN NOT NULL DEFAULT FALSE);
+                CREATE TABLE IF NOT EXISTS Statuses(Name {ci} PRIMARY KEY, SortOrder INTEGER NOT NULL DEFAULT 0, IsBuiltIn BOOLEAN NOT NULL DEFAULT FALSE);
                 CREATE TABLE IF NOT EXISTS Assets(StoredName TEXT PRIMARY KEY, Sha256 TEXT NOT NULL, MimeType TEXT NOT NULL DEFAULT '', Size BIGINT NOT NULL, Data BYTEA NOT NULL, CreatedAt TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS IX_Assets_Hash ON Assets(Sha256);
                 INSERT INTO Statuses(Name,SortOrder,IsBuiltIn) VALUES('Черновик',0,TRUE),('В работе',1,TRUE),('На проверке',2,TRUE),('Завершён',3,TRUE),('Архив',4,TRUE) ON CONFLICT (Name) DO NOTHING;
@@ -124,14 +128,36 @@ public sealed class PostgresDocumentStore : IDocumentStore
         EnsureColumn(connection, "DocumentVersions", "EditorJson", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(connection, "DocumentVersions", "Html", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(connection, "DocumentVersions", "IsPinned", "BOOLEAN NOT NULL DEFAULT FALSE");
+        using (var cleanup = connection.CreateCommand())
+        {
+            // Таблица Settings осталась от прежних версий: в ней лежало состояние интерфейса
+            // рабочего места (размеры окна, раскрытые узлы). В общей базе документации таким
+            // данным не место — теперь они хранятся локально (LocalStateService).
+            cleanup.CommandText = "DROP TABLE IF EXISTS Settings";
+            cleanup.ExecuteNonQuery();
+        }
         using (var statuses = connection.CreateCommand())
         {
             statuses.CommandText = "INSERT INTO Statuses(Name,SortOrder,IsBuiltIn) SELECT DISTINCT Status,100,FALSE FROM Nodes WHERE trim(Status)<>'' ON CONFLICT (Name) DO NOTHING";
             statuses.ExecuteNonQuery();
         }
+        using (var siblings = connection.CreateCommand())
+        {
+            // Защита от гонки: проверка TitleExists и вставка идут разными запросами, поэтому при
+            // одновременной работе нескольких пользователей одно и то же название могло появиться
+            // дважды. Уникальный индекс не даёт задвоить элемент, а Create превращает отказ базы в
+            // обычную ошибку «такой элемент уже существует». Индекс создаётся best-effort: в базе,
+            // где дубликаты уже накопились, он просто не появится (о чём будет запись в журнале).
+            // IsFolder входит в ключ: папка и документ — разные типы элементов и названия друг у
+            // друга не занимают. Прежний индекс без IsFolder удаляется.
+            siblings.CommandText = "DROP INDEX IF EXISTS IX_Nodes_Sibling; CREATE UNIQUE INDEX IF NOT EXISTS IX_Nodes_Sibling_Kind ON Nodes(COALESCE(ParentId,0), IsFolder, lower(Title)) WHERE DeletedAt IS NULL";
+            try { siblings.ExecuteNonQuery(); }
+            catch (PostgresException ex) { LogService.Error("Не удалось создать индекс уникальности названий: в базе есть элементы-дубликаты", ex); }
+        }
         using (var identities = connection.CreateCommand())
         {
-            identities.CommandText = "UPDATE Nodes SET Guid=gen_random_uuid()::text WHERE Guid=''; CREATE UNIQUE INDEX IF NOT EXISTS IX_Nodes_Guid ON Nodes(Guid);";
+            // md5(...)::uuid не требует pgcrypto и работает на любой версии сервера, в отличие от gen_random_uuid().
+            identities.CommandText = "UPDATE Nodes SET Guid=md5(random()::text||clock_timestamp()::text||Id::text)::uuid::text WHERE Guid=''; CREATE UNIQUE INDEX IF NOT EXISTS IX_Nodes_Guid ON Nodes(Guid);";
             identities.ExecuteNonQuery();
         }
         using (var search = connection.CreateCommand())
@@ -144,17 +170,20 @@ public sealed class PostgresDocumentStore : IDocumentStore
                   SearchVector TSVECTOR GENERATED ALWAYS AS (to_tsvector('russian', coalesce(Title,'') || ' ' || coalesce(PlainText,''))) STORED
                 );
                 CREATE INDEX IF NOT EXISTS IX_SearchIndex_Vector ON SearchIndex USING GIN(SearchVector);
-                DELETE FROM SearchIndex;
                 INSERT INTO SearchIndex(NodeId,Title,PlainText)
                   SELECT n.Id, n.Title,
                     n.PlainText || ' ' || n.Status
                     || ' ' || COALESCE((SELECT Title FROM Nodes p WHERE p.Id=n.ParentId),'')
                     || ' ' || COALESCE((SELECT string_agg(t.Name,' ') FROM DocumentTags dt JOIN Tags t ON t.Id=dt.TagId WHERE dt.DocumentId=n.Id),'')
                     || ' ' || COALESCE((SELECT string_agg(a.FileName,' ') FROM Attachments a WHERE a.DocumentId=n.Id),'')
-                  FROM Nodes n WHERE n.IsFolder=FALSE;
+                  FROM Nodes n WHERE n.IsFolder=FALSE
+                ON CONFLICT (NodeId) DO UPDATE SET Title=EXCLUDED.Title, PlainText=EXCLUDED.PlainText;
                 """;
             search.ExecuteNonQuery();
         }
+        // Схема (и, возможно, расширение citext) создана только что — клиентский каталог типов
+        // Npgsql, прочитанный при первом подключении, об этом ещё не знает.
+        PostgresProvisioning.RefreshTypeCache(connection);
         LogService.Info("Хранилище инициализировано (PostgreSQL)");
     }
 
@@ -165,7 +194,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
         AddUser(command);
         if (string.IsNullOrWhiteSpace(query))
         {
-            command.CommandText = $"SELECT Id,ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt FROM Nodes WHERE DeletedAt IS NULL AND {AccessFilter} ORDER BY SortOrder,Title";
+            command.CommandText = $"SELECT Id,ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt,IsTemplate FROM Nodes WHERE DeletedAt IS NULL AND {AccessFilter} ORDER BY SortOrder,Title";
         }
         else
         {
@@ -179,7 +208,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
                   UNION
                   SELECT n.ParentId FROM Nodes n JOIN visible v ON n.Id=v.Id WHERE n.ParentId IS NOT NULL
                 )
-                SELECT DISTINCT n.Id,n.ParentId,n.IsFolder,n.Title,n.SortOrder,n.CreatedAt,n.ModifiedAt
+                SELECT DISTINCT n.Id,n.ParentId,n.IsFolder,n.Title,n.SortOrder,n.CreatedAt,n.ModifiedAt,n.IsTemplate
                 FROM Nodes n JOIN visible v ON v.Id=n.Id WHERE n.DeletedAt IS NULL AND {AccessFilterAliased} ORDER BY n.SortOrder,n.Title
                 """;
             command.Parameters.AddWithValue("q", $"%{term}%");
@@ -188,7 +217,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
         }
         var all = new List<NodeItem>();
         using var reader = command.ExecuteReader();
-        while (reader.Read()) all.Add(new NodeItem { Id = reader.GetInt64(0), ParentId = reader.IsDBNull(1) ? null : reader.GetInt64(1), IsFolder = reader.GetBoolean(2), Title = reader.GetString(3), SortOrder = reader.GetInt32(4), CreatedAt = DateTime.Parse(reader.GetString(5)), ModifiedAt = DateTime.Parse(reader.GetString(6)) });
+        while (reader.Read()) all.Add(new NodeItem { Id = reader.GetInt64(0), ParentId = reader.IsDBNull(1) ? null : reader.GetInt64(1), IsFolder = reader.GetBoolean(2), Title = reader.GetString(3), SortOrder = reader.GetInt32(4), CreatedAt = DateTime.Parse(reader.GetString(5)), ModifiedAt = DateTime.Parse(reader.GetString(6)), IsTemplate = reader.GetBoolean(7) });
         var byId = all.ToDictionary(x => x.Id);
         foreach (var node in all.Where(x => x.ParentId.HasValue && byId.ContainsKey(x.ParentId.Value))) byId[node.ParentId!.Value].Children.Add(node);
         return all.Where(x => !x.ParentId.HasValue || !byId.ContainsKey(x.ParentId.Value)).ToList();
@@ -216,7 +245,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
     {
         title = title.Trim();
         if (title.Length == 0) throw new ArgumentException("Название не может быть пустым.");
-        if (TitleExists(parentId, title)) throw new InvalidOperationException($"В выбранной папке уже существует элемент «{title}».");
+        if (TitleConflict(parentId, title, folder) is string conflict) throw new InvalidOperationException(conflict);
         var now = DateTime.UtcNow.ToString("O");
         using var connection = Open();
         using var command = connection.CreateCommand();
@@ -228,24 +257,57 @@ public sealed class PostgresDocumentStore : IDocumentStore
         command.Parameters.AddWithValue("g", Guid.NewGuid().ToString("D"));
         command.Parameters.AddWithValue("private", isPrivate);
         command.Parameters.AddWithValue("owner", UserIdentity.Current);
-        return (long)command.ExecuteScalar()!;
+        try { return (long)command.ExecuteScalar()!; }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            // Элемент с таким названием создал параллельно работающий пользователь.
+            throw new InvalidOperationException(TitleConflict(parentId, title, folder) ?? TitleConflicts.Generic(title), ex);
+        }
     }
 
-    public bool TitleExists(long? parentId, string title, long? exceptId = null)
+    public bool TitleExists(long? parentId, string title, long? exceptId = null, bool? isFolder = null)
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM Nodes WHERE ParentId IS NOT DISTINCT FROM @p AND Title=@t AND DeletedAt IS NULL AND (@e::bigint IS NULL OR Id<>@e))";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM Nodes WHERE ParentId IS NOT DISTINCT FROM @p AND Title=@t AND DeletedAt IS NULL AND (@e::bigint IS NULL OR Id<>@e) AND (@kind::boolean IS NULL OR IsFolder=@kind))";
         AddNullableLong(command, "p", parentId);
         command.Parameters.AddWithValue("t", title.Trim());
         AddNullableLong(command, "e", exceptId);
+        AddNullableBool(command, "kind", isFolder);
         return (bool)command.ExecuteScalar()!;
+    }
+
+    private static void AddNullableBool(NpgsqlCommand command, string name, bool? value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.DbType = System.Data.DbType.Boolean;
+        parameter.Value = (object?)value ?? DBNull.Value;
+        command.Parameters.Add(parameter);
+    }
+
+    /// <summary>
+    /// Описание занятого названия или null, если название свободно. Учитываются и папки, и
+    /// документы, включая невидимые приватные страницы других пользователей: удалённое в корзину
+    /// названий не занимает.
+    /// </summary>
+    private string? TitleConflict(long? parentId, string title, bool isFolder, long? exceptId = null, string where = "В этой папке")
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Title,IsFolder,IsPrivate,Owner FROM Nodes WHERE ParentId IS NOT DISTINCT FROM @p AND Title=@t AND IsFolder=@kind AND DeletedAt IS NULL AND (@e::bigint IS NULL OR Id<>@e) LIMIT 1";
+        AddNullableLong(command, "p", parentId);
+        command.Parameters.AddWithValue("t", title.Trim());
+        command.Parameters.AddWithValue("kind", isFolder);
+        AddNullableLong(command, "e", exceptId);
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? TitleConflicts.Describe(reader.GetString(0), reader.GetBoolean(1), reader.GetBoolean(2), reader.GetString(3), where) : null;
     }
 
     public void Rename(long id, string title)
     {
         var node = FindNode(id) ?? throw new InvalidOperationException("Элемент не найден.");
-        if (TitleExists(node.ParentId, title, id)) throw new InvalidOperationException($"В выбранной папке уже существует элемент «{title}».");
+        if (TitleConflict(node.ParentId, title, node.IsFolder, id) is string conflict) throw new InvalidOperationException(conflict);
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = "UPDATE Nodes SET Title=@v, ModifiedAt=@m WHERE Id=@id";
@@ -269,7 +331,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
 
     public long CreateFromTemplate(long templateId, long? parentId, string title, IReadOnlyDictionary<string, string>? variables = null)
     {
-        if (TitleExists(parentId, title)) throw new InvalidOperationException($"В выбранной папке уже существует документ «{title}».");
+        if (TitleConflict(parentId, title, false) is string conflict) throw new InvalidOperationException(conflict);
         using var connection = Open();
         using var transaction = connection.BeginTransaction();
         long created;
@@ -278,7 +340,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
             command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO Nodes(ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt,Content,PlainText,Status,EditorJson,Html,Markdown,TemplateSourceId,Guid,Author,Owner)
-                SELECT @p,FALSE,@t,(SELECT COALESCE(MAX(SortOrder)+1,0) FROM Nodes WHERE ParentId IS NOT DISTINCT FROM @p),@d,@d,Content,PlainText,'Черновик',EditorJson,Html,Markdown,Id,gen_random_uuid()::text,@owner,@owner
+                SELECT @p,FALSE,@t,(SELECT COALESCE(MAX(SortOrder)+1,0) FROM Nodes WHERE ParentId IS NOT DISTINCT FROM @p),@d,@d,Content,PlainText,'Черновик',EditorJson,Html,Markdown,Id,@g,@owner,@owner
                 FROM Nodes WHERE Id=@id AND IsTemplate=TRUE
                 RETURNING Id
                 """;
@@ -286,6 +348,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
             command.Parameters.AddWithValue("t", title.Trim());
             command.Parameters.AddWithValue("d", DateTime.UtcNow.ToString("O"));
             command.Parameters.AddWithValue("id", templateId);
+            command.Parameters.AddWithValue("g", Guid.NewGuid().ToString("D"));
             command.Parameters.AddWithValue("owner", UserIdentity.Current);
             var result = command.ExecuteScalar();
             if (result is null) throw new InvalidOperationException("Шаблон не найден.");
@@ -375,6 +438,24 @@ public sealed class PostgresDocumentStore : IDocumentStore
         return reader.Read() ? new NodeItem { Id = reader.GetInt64(0), ParentId = reader.IsDBNull(1) ? null : reader.GetInt64(1), IsFolder = false, Title = reader.GetString(3), SortOrder = reader.GetInt32(4), CreatedAt = DateTime.Parse(reader.GetString(5)), ModifiedAt = DateTime.Parse(reader.GetString(6)) } : null;
     }
 
+    /// <summary>Переносит на страницу постоянный идентификатор оригинала (см. IDocumentStore).</summary>
+    public void SetDocumentGuid(long id, string guid)
+    {
+        if (string.IsNullOrWhiteSpace(guid)) return;
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        // Занятый другим документом идентификатор не перезаписывается: условие NOT EXISTS
+        // делает запрос безопасным и при одновременной работе нескольких пользователей.
+        command.CommandText = "UPDATE Nodes SET Guid=@g WHERE Id=@id AND IsFolder=FALSE AND NOT EXISTS(SELECT 1 FROM Nodes o WHERE o.Guid=@g AND o.Id<>@id)";
+        command.Parameters.AddWithValue("id", id);
+        command.Parameters.AddWithValue("g", guid);
+        try { command.ExecuteNonQuery(); }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            LogService.Error("Идентификатор страницы уже занят другой страницей: " + guid, ex);
+        }
+    }
+
     public void Move(long id, long? parentId)
     {
         var source = FindNode(id) ?? throw new InvalidOperationException("Перемещаемый элемент не найден.");
@@ -393,7 +474,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
             cycle.Parameters.AddWithValue("parent", parent);
             if ((bool)cycle.ExecuteScalar()!) throw new InvalidOperationException("Нельзя переместить папку внутрь её дочернего элемента.");
         }
-        if (TitleExists(parentId, source.Title, id)) throw new InvalidOperationException($"В целевой папке уже существует элемент «{source.Title}».");
+        if (TitleConflict(parentId, source.Title, source.IsFolder, id, "В целевой папке") is string conflict) throw new InvalidOperationException(conflict);
         using var command = connection.CreateCommand();
         command.CommandText = "UPDATE Nodes SET ParentId=@p, SortOrder=(SELECT COALESCE(MAX(SortOrder)+1,0) FROM Nodes WHERE ParentId IS NOT DISTINCT FROM @p AND Id<>@id), ModifiedAt=@m WHERE Id=@id";
         command.Parameters.AddWithValue("id", id);
@@ -416,23 +497,25 @@ public sealed class PostgresDocumentStore : IDocumentStore
     public void Restore(long id)
     {
         using var connection = Open();
-        long? parent; string original;
+        long? parent; string original; bool isFolder;
         using (var find = connection.CreateCommand())
         {
-            find.CommandText = "SELECT ParentId,Title FROM Nodes WHERE Id=@id AND DeletedAt IS NOT NULL";
+            find.CommandText = "SELECT ParentId,Title,IsFolder FROM Nodes WHERE Id=@id AND DeletedAt IS NOT NULL";
             find.Parameters.AddWithValue("id", id);
             using var reader = find.ExecuteReader();
             if (!reader.Read()) throw new InvalidOperationException("Элемент не найден в корзине.");
             parent = reader.IsDBNull(0) ? null : reader.GetInt64(0);
             original = reader.GetString(1);
+            isFolder = reader.GetBoolean(2);
         }
         var title = original;
         for (var i = 2; ; i++)
         {
             using var conflict = connection.CreateCommand();
-            conflict.CommandText = "SELECT EXISTS(SELECT 1 FROM Nodes WHERE ParentId IS NOT DISTINCT FROM @p AND Title=@t AND DeletedAt IS NULL AND Id<>@id)";
+            conflict.CommandText = "SELECT EXISTS(SELECT 1 FROM Nodes WHERE ParentId IS NOT DISTINCT FROM @p AND Title=@t AND IsFolder=@kind AND DeletedAt IS NULL AND Id<>@id)";
             AddNullableLong(conflict, "p", parent);
             conflict.Parameters.AddWithValue("t", title);
+            conflict.Parameters.AddWithValue("kind", isFolder);
             conflict.Parameters.AddWithValue("id", id);
             if (!(bool)conflict.ExecuteScalar()!) break;
             title = $"{original} (восстановлено {i})";
@@ -472,7 +555,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
         var source = FindNode(id) ?? throw new InvalidOperationException("Документ не найден.");
         var baseTitle = source.Title + " — копия";
         var title = baseTitle;
-        for (var i = 2; TitleExists(source.ParentId, title); i++) title = $"{baseTitle} ({i})";
+        for (var i = 2; TitleExists(source.ParentId, title, null, source.IsFolder); i++) title = $"{baseTitle} ({i})";
         using var connection = Open();
         using var transaction = connection.BeginTransaction();
         long copy;
@@ -481,12 +564,13 @@ public sealed class PostgresDocumentStore : IDocumentStore
             command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO Nodes(ParentId,IsFolder,Title,SortOrder,CreatedAt,ModifiedAt,Content,PlainText,Status,EditorJson,Html,Markdown,Zoom,Guid,Author,IsPrivate,Owner)
-                SELECT ParentId,IsFolder,@t,(SELECT COALESCE(MAX(SortOrder)+1,0) FROM Nodes x WHERE x.ParentId IS NOT DISTINCT FROM Nodes.ParentId),@d,@d,Content,PlainText,Status,EditorJson,Html,Markdown,Zoom,gen_random_uuid()::text,Author,IsPrivate,Owner
+                SELECT ParentId,IsFolder,@t,(SELECT COALESCE(MAX(SortOrder)+1,0) FROM Nodes x WHERE x.ParentId IS NOT DISTINCT FROM Nodes.ParentId),@d,@d,Content,PlainText,Status,EditorJson,Html,Markdown,Zoom,@g,Author,IsPrivate,Owner
                 FROM Nodes WHERE Id=@id
                 RETURNING Id
                 """;
             command.Parameters.AddWithValue("id", id);
             command.Parameters.AddWithValue("t", title);
+            command.Parameters.AddWithValue("g", Guid.NewGuid().ToString("D"));
             command.Parameters.AddWithValue("d", DateTime.UtcNow.ToString("O"));
             copy = (long)command.ExecuteScalar()!;
         }
@@ -763,25 +847,6 @@ public sealed class PostgresDocumentStore : IDocumentStore
             while (reader.Read()) names.Add(reader.GetString(0));
         }
         return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-    }
-
-    public string? GetSetting(string key)
-    {
-        using var connection = Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Value FROM Settings WHERE Key=@k";
-        command.Parameters.AddWithValue("k", key);
-        return command.ExecuteScalar() as string;
-    }
-
-    public void SetSetting(string key, string value)
-    {
-        using var connection = Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = "INSERT INTO Settings(Key,Value) VALUES(@k,@v) ON CONFLICT(Key) DO UPDATE SET Value=@v";
-        command.Parameters.AddWithValue("k", key);
-        command.Parameters.AddWithValue("v", value);
-        command.ExecuteNonQuery();
     }
 
     public void Checkpoint()
@@ -1136,7 +1201,7 @@ public sealed class PostgresDocumentStore : IDocumentStore
                 command.Transaction = transaction;
                 command.CommandText = """
                     INSERT INTO Tags(Name) VALUES(@n) ON CONFLICT (Name) DO NOTHING;
-                    INSERT INTO DocumentTags(DocumentId,TagId) SELECT @id, Id FROM Tags WHERE Name=@n;
+                    INSERT INTO DocumentTags(DocumentId,TagId) SELECT @id, Id FROM Tags WHERE Name=@n ON CONFLICT DO NOTHING;
                     """;
                 command.Parameters.AddWithValue("id", id);
                 command.Parameters.AddWithValue("n", value);
@@ -1218,15 +1283,19 @@ public sealed class PostgresDocumentStore : IDocumentStore
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
+        // Индекс перестраивается «на месте» (upsert + удаление осиротевших строк), а не через
+        // DELETE всей таблицы: иначе одновременная работа нескольких пользователей приводила бы
+        // к взаимным блокировкам и временно пустому поиску у соседей.
         command.CommandText = """
-            DELETE FROM SearchIndex;
+            DELETE FROM SearchIndex WHERE NodeId NOT IN(SELECT Id FROM Nodes WHERE IsFolder=FALSE);
             INSERT INTO SearchIndex(NodeId,Title,PlainText)
               SELECT n.Id, n.Title,
                 n.PlainText || ' ' || n.Status
                 || ' ' || COALESCE((SELECT Title FROM Nodes p WHERE p.Id=n.ParentId),'')
                 || ' ' || COALESCE((SELECT string_agg(t.Name,' ') FROM DocumentTags dt JOIN Tags t ON t.Id=dt.TagId WHERE dt.DocumentId=n.Id),'')
                 || ' ' || COALESCE((SELECT string_agg(a.FileName,' ') FROM Attachments a WHERE a.DocumentId=n.Id),'')
-              FROM Nodes n WHERE n.IsFolder=FALSE;
+              FROM Nodes n WHERE n.IsFolder=FALSE
+            ON CONFLICT (NodeId) DO UPDATE SET Title=EXCLUDED.Title, PlainText=EXCLUDED.PlainText;
             """;
         command.ExecuteNonQuery();
     }

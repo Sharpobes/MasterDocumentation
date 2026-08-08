@@ -23,7 +23,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public bool DarkTheme { get => _dark; set=>SetTheme(value?"Тёмная":"Светлая"); }
     public string Theme=>_theme;
     public MainViewModel(DatabaseService database, BackupService backups,SettingsService settingsService) { Database = database; Backups = backups;_settingsService=settingsService; Database.Initialize();var settings=_settingsService.Load();_theme=settings.Theme;_dark=ResolveDarkTheme(_theme);SystemParameters.StaticPropertyChanged+=(_,args)=>{if(args.PropertyName==nameof(SystemParameters.HighContrast))Application.Current?.Dispatcher.BeginInvoke(ApplyTheme);}; ReloadTree(); ApplyTheme(); }
-    public void ReloadTree() { Nodes.Clear();var expanded=(Database.GetSetting("ExpandedNodeIds")??"").Split(',',StringSplitOptions.RemoveEmptyEntries).Select(x=>long.TryParse(x,out var id)?id:0).Where(x=>x>0).ToHashSet();foreach(var n in Database.LoadTree(Search)){ApplyExpanded(n,expanded);Nodes.Add(n);} }
+    /// <summary>
+    /// Дерево документации. Шаблоны из него исключаются: для них есть отдельный раздел
+    /// «Шаблоны», а в списке документов они только мешали.
+    /// </summary>
+    public void ReloadTree() { Nodes.Clear();var expanded=(Database.GetSetting("ExpandedNodeIds")??"").Split(',',StringSplitOptions.RemoveEmptyEntries).Select(x=>long.TryParse(x,out var id)?id:0).Where(x=>x>0).ToHashSet();foreach(var n in Database.LoadTree(Search)){if(n.IsTemplate&&!n.IsFolder)continue;RemoveTemplates(n);ApplyExpanded(n,expanded);Nodes.Add(n);} }
+    private static void RemoveTemplates(NodeItem node){for(var i=node.Children.Count-1;i>=0;i--){var child=node.Children[i];if(child.IsTemplate&&!child.IsFolder)node.Children.RemoveAt(i);else RemoveTemplates(child);}}
     private static void ApplyExpanded(NodeItem node,HashSet<long> expanded){node.IsExpanded=expanded.Count==0||expanded.Contains(node.Id);foreach(var child in node.Children)ApplyExpanded(child,expanded);}
     public void ShowAll() { Search = ""; ReloadTree(); }
     public void ShowFavorites() { Nodes.Clear(); foreach (var n in Database.LoadFavorites()) Nodes.Add(n); }

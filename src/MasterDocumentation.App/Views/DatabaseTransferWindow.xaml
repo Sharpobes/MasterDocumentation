@@ -135,8 +135,11 @@
         </TabControl>
 
         <Grid Grid.Row="3" Margin="0,14,0,0">
-            <TextBlock x:Name="StatusText" Foreground="{DynamicResource Text/Muted}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,120,0"/>
-            <Button Content="Закрыть" IsCancel="True" HorizontalAlignment="Right"/>
+            <TextBlock x:Name="StatusText" Foreground="{DynamicResource Text/Muted}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,340,0"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="RetryAssetsButton" Content="Повторить перенос изображений" Click="RetryAssets_Click" Visibility="Collapsed" Margin="0,0,8,0"/>
+                <Button Content="Закрыть" IsCancel="True"/>
+            </StackPanel>
         </Grid>
     </Grid>
 </Window>

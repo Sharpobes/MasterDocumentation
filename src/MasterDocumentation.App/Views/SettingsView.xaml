@@ -52,6 +52,7 @@
       <WrapPanel>
        <Button x:Name="TestConnectionButton" Content="Проверить соединение" Click="TestConnection_Click"/>
        <Button x:Name="MigrateToPostgresButton" Content="Перенести текущие данные в PostgreSQL" Click="MigrateToPostgres_Click" Margin="8,0,0,0"/>
+       <Button x:Name="RetryAssetsButton" Content="Повторить перенос изображений" Click="RetryAssets_Click" Visibility="Collapsed" Margin="8,0,0,0"/>
       </WrapPanel>
       <TextBlock x:Name="StorageProviderStatusText" Foreground="{DynamicResource Text/Muted}" TextWrapping="Wrap" Margin="0,10,0,0"/>
      </StackPanel>

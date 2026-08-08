@@ -4,17 +4,17 @@
 
 Откройте [страницу всех релизов](https://github.com/Sharpobes/MasterDocumentation/releases). GitHub хранит каждую опубликованную версию отдельно, поэтому можно скачать как последнюю, так и предыдущую сборку.
 
-Для версии 1.4.0 используйте:
+Для версии 1.5.0 используйте:
 
-- [установщик v1.4.0](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.4.0/MasterDocumentation-Setup-v1.4.0.exe) — графическая установка;
-- [portable ZIP v1.4.0](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.4.0/MasterDocumentation-v1.4.0-win-x64.zip) — распаковка вручную;
-- [SHA-256 установщика](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.4.0/MasterDocumentation-Setup-v1.4.0.exe.sha256) и [SHA-256 архива](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.4.0/MasterDocumentation-v1.4.0-win-x64.zip.sha256).
+- [установщик v1.5.0](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.5.0/MasterDocumentation-Setup-v1.5.0.exe) — графическая установка;
+- [portable ZIP v1.5.0](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.5.0/MasterDocumentation-v1.5.0-win-x64.zip) — распаковка вручную;
+- [SHA-256 установщика](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.5.0/MasterDocumentation-Setup-v1.5.0.exe.sha256) и [SHA-256 архива](https://github.com/Sharpobes/MasterDocumentation/releases/download/v1.5.0/MasterDocumentation-v1.5.0-win-x64.zip.sha256).
 
 Если репозиторий закрыт (private), ссылки на файлы релиза открываются только у участников с доступом. Чтобы их мог скачать любой пользователь, репозиторий нужно сделать публичным: **Settings → General → Danger Zone → Change repository visibility → Public**.
 
 ## Установка через установщик
 
-1. Скачайте `MasterDocumentation-Setup-v1.4.0.exe` из блока **Assets** на странице релиза.
+1. Скачайте `MasterDocumentation-Setup-v1.5.0.exe` из блока **Assets** на странице релиза.
 2. Запустите файл. Откроется окно установки с двумя режимами:
    - **Установить на компьютер** — ярлыки на рабочем столе и в меню «Пуск», запись в «Программы и компоненты», документация в профиле пользователя;
    - **Портативная версия** — приложение и его документация в одной папке, реестр и система не изменяются.
@@ -51,8 +51,8 @@
 В PowerShell выполните:
 
 ```powershell
-Get-FileHash .\MasterDocumentation-Setup-v1.4.0.exe -Algorithm SHA256
-Get-Content .\MasterDocumentation-Setup-v1.4.0.exe.sha256
+Get-FileHash .\MasterDocumentation-Setup-v1.5.0.exe -Algorithm SHA256
+Get-Content .\MasterDocumentation-Setup-v1.5.0.exe.sha256
 ```
 
 Хеши должны совпасть. Файлы `.sha256` создаёт тот же workflow, который собирает релиз.

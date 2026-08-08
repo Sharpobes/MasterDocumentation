@@ -113,7 +113,26 @@
              а весь список открытых документов доступен по кнопке переполнения справа. -->
         <!-- Вкладки документов и вкладка настроек стоят в одном ряду: настройки не прячут список
              документов, между ними можно переключаться одним щелчком. -->
-        <StackPanel x:Name="TabStrip" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" ClipToBounds="True" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+        <!-- DockPanel, а не StackPanel: горизонтальный StackPanel даёт вкладкам документов всю
+             нужную им ширину, поэтому при трёх и более открытых документах вкладка настроек
+             уезжала за край строки и наслаивалась на последнюю вкладку. Здесь настройки
+             занимают своё место справа первыми, а список документов получает остаток ширины и
+             обрезается по границе полосы (полный список — в меню переполнения). -->
+        <DockPanel x:Name="TabStrip" Grid.Column="1" VerticalAlignment="Center" LastChildFill="True" ClipToBounds="True" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+        <!-- Объявлена раньше списка вкладок: DockPanel отдаёт место закреплённым элементам в
+             порядке объявления, а последний (список документов) занимает остаток. -->
+        <Border x:Name="SettingsTabHeader" DockPanel.Dock="Right" Visibility="Collapsed" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Margin="3,0" Padding="8,0" Height="38" VerticalAlignment="Center" Width="185" Cursor="Hand" MouseLeftButtonUp="SettingsTab_Click" ToolTip="Вкладка настроек" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <ui:AppIcon Kind="Settings" Width="16" Height="16" Foreground="{DynamicResource Accent/Hover}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="Настройки" Foreground="{DynamicResource Text/Primary}" FontWeight="SemiBold" Margin="9,0" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="×" Width="25" Height="25" MinHeight="25" Click="CloseSettingsTab_Click" ToolTip="Закрыть настройки" />
+          </Grid>
+        </Border>
         <ListBox x:Name="Tabs" ItemsSource="{Binding Tabs}" SelectedItem="{Binding SelectedTab,Mode=TwoWay}" SelectionChanged="Tabs_SelectionChanged" Background="Transparent" BorderThickness="0" Padding="0" VerticalAlignment="Center" ScrollViewer.HorizontalScrollBarVisibility="Hidden" ScrollViewer.VerticalScrollBarVisibility="Disabled" shell:WindowChrome.IsHitTestVisibleInChrome="True">
           <ListBox.ItemContainerStyle>
             <!-- Контейнер не рисует собственную рамку: её рисует карточка вкладки,
@@ -136,7 +155,15 @@
           </ListBox.ItemsPanel>
           <ListBox.ItemTemplate>
             <DataTemplate>
-              <Border x:Name="TabSurface" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Margin="3,0" Padding="8,0" Height="38" VerticalAlignment="Center" MinWidth="130" MaxWidth="235">
+              <!-- Ширина делится между открытыми вкладками: при четырёх и более они сжимаются,
+                   а не обрезаются краем полосы. -->
+              <Border x:Name="TabSurface" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Margin="3,0" Padding="8,0" Height="38" VerticalAlignment="Center">
+                <Border.Width>
+                  <MultiBinding Converter="{StaticResource TabWidthConverter}">
+                    <Binding ElementName="Tabs" Path="ActualWidth" />
+                    <Binding ElementName="Tabs" Path="DataContext.Tabs.Count" />
+                  </MultiBinding>
+                </Border.Width>
                 <Border.ToolTip>
                   <ToolTip>
                     <StackPanel MaxWidth="360">
@@ -182,19 +209,7 @@
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
-        <Border x:Name="SettingsTabHeader" Visibility="Collapsed" Background="{DynamicResource Background/SurfaceElevated}" BorderBrush="{DynamicResource Border/Default}" BorderThickness="1" CornerRadius="{StaticResource Radius.Small}" Margin="3,0" Padding="8,0" Height="38" VerticalAlignment="Center" Width="185" HorizontalAlignment="Left" Cursor="Hand" MouseLeftButtonUp="SettingsTab_Click" ToolTip="Вкладка настроек" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="Auto" />
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <ui:AppIcon Kind="Settings" Width="16" Height="16" Foreground="{DynamicResource Accent/Hover}" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1" Text="Настройки" Foreground="{DynamicResource Text/Primary}" FontWeight="SemiBold" Margin="9,0" VerticalAlignment="Center" />
-            <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="×" Width="25" Height="25" MinHeight="25" Click="CloseSettingsTab_Click" ToolTip="Закрыть настройки" />
-          </Grid>
-        </Border>
-        </StackPanel>
+        </DockPanel>
         <!-- Список открытых вкладок открывается из меню приложения: отдельная кнопка в строке
              заголовка рисовалась пустым квадратом (стиль IconButton показывает только текстовый
              значок) и мешала. -->
@@ -290,7 +305,7 @@
             <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
           <Grid Grid.Row="0">
-            <!-- Создание доступно ровно из двух мест: этой кнопки и «＋» около «Разделы».
+            <!-- Создание доступно ровно из двух мест: этой кнопки и «＋» около «Документы».
                  Обе открывают один и тот же список создания и импорта. -->
             <Button x:Name="CreateDocumentButton" Content="＋  Создать документ" Height="36" Margin="8" Padding="10,7" Style="{StaticResource PrimaryButtonStyle}" Click="CreateMenu_Click" ToolTip="Создать или импортировать (Ctrl+N — сразу документ)" />
           </Grid>
@@ -347,7 +362,8 @@
                 <ColumnDefinition />
                 <ColumnDefinition Width="Auto" />
               </Grid.ColumnDefinitions>
-              <TextBlock x:Name="SectionsHeaderText" Text="РАЗДЕЛЫ" Foreground="{DynamicResource Text/Secondary}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+              <!-- Список документов и папок: шаблоны сюда не попадают, для них есть свой раздел. -->
+              <TextBlock x:Name="SectionsHeaderText" Text="ДОКУМЕНТЫ" Foreground="{DynamicResource Text/Secondary}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
               <Grid Grid.Column="1">
                 <Button x:Name="SectionAddButton" Content="＋" ToolTip="Создать или импортировать" Style="{StaticResource IconButton}" Width="26" Height="26" MinHeight="26" Click="SectionAdd_Click" />
                 <Popup x:Name="CreateMenuPopup" PlacementTarget="{Binding ElementName=SectionAddButton}" Placement="Bottom" HorizontalOffset="-200" StaysOpen="False" AllowsTransparency="True">
@@ -387,6 +403,10 @@
             <TreeView.ContextMenu>
               <ContextMenu>
                 <MenuItem x:Name="OpenMenuItem" Header="Открыть" Click="OpenNode_Click" />
+                <!-- Создание внутри папки: пункты показываются только на папках вне корзины. -->
+                <MenuItem x:Name="NewDocumentInFolderMenuItem" Header="Создать документ в папке" Click="NewDocumentInFolder_Click" />
+                <MenuItem x:Name="NewFolderInFolderMenuItem" Header="Создать вложенную папку" Click="NewFolderInFolder_Click" />
+                <Separator x:Name="CreateMenuSeparator" />
                 <MenuItem x:Name="DuplicateMenuItem" Header="Создать копию" Click="DuplicateSelectedNode_Click" />
                 <MenuItem x:Name="CopyLinkMenuItem" Header="Копировать внутреннюю ссылку" Click="CopyDocumentLink_Click" />
                 <!-- Подпись меняется по состоянию документа: см. Tree_ContextMenuOpening. -->
@@ -414,7 +434,8 @@
               <ui:AppIcon x:Name="NavigationEmptyIcon" Kind="Documents" Width="30" Height="30" Foreground="{DynamicResource Text/Muted}" HorizontalAlignment="Center" />
               <TextBlock x:Name="NavigationEmptyTitle" Text="Здесь пока пусто" Margin="0,10,0,0" FontWeight="SemiBold" TextAlignment="Center" />
               <TextBlock x:Name="NavigationEmptyDescription" Text="Создайте первый документ, чтобы начать работу." Margin="0,5,0,10" Foreground="{DynamicResource Text/Muted}" TextWrapping="Wrap" TextAlignment="Center" />
-              <Button x:Name="NavigationEmptyAction" Content="Создать документ" Style="{StaticResource PrimaryButtonStyle}" Click="NewDocument_Click" />
+              <!-- Подпись и действие зависят от раздела: в «Шаблонах» кнопка создаёт шаблон. -->
+              <Button x:Name="NavigationEmptyAction" Content="Создать документ" Style="{StaticResource PrimaryButtonStyle}" Click="NavigationEmptyAction_Click" />
             </StackPanel>
             <TextBlock x:Name="TrashHintText" Visibility="Collapsed" VerticalAlignment="Bottom" Margin="12,0,12,8"
                        Text="Удалённое хранится 30 дней, затем удаляется окончательно."

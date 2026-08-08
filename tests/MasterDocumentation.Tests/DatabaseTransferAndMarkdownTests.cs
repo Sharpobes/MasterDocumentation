@@ -118,6 +118,129 @@ public sealed class DatabaseTransferAndMarkdownTests : IDisposable
         Assert.Contains("Текст", target.LoadStructuredContent(document.Id).PlainText);
     }
 
+    /// <summary>
+    /// Содержимое страницы (JSON редактора, HTML и Markdown) должно доезжать целиком: именно из
+    /// EditorJson редактор рисует страницу, и при его потере документ открывается пустым.
+    /// Удалённое в корзину при этом не переносится.
+    /// </summary>
+    [Fact]
+    public void PageContentSurvivesTransferAndTrashIsNotCopied()
+    {
+        var source = new SqliteDocumentStore(Path.Combine(AppPaths.Data, "content-source.db"));
+        source.Initialize();
+        var target = new SqliteDocumentStore(Path.Combine(AppPaths.Data, "content-target.db"));
+        target.Initialize();
+
+        var json = "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Текст страницы\"}]}]}";
+        var page = source.Create(null, false, "Страница с содержимым");
+        source.SaveStructuredContent(page, json, "<h1>Раздел</h1><p>Текст страницы</p>", "Раздел Текст страницы");
+        var removed = source.Create(null, false, "Удалённая страница");
+        source.SaveStructuredContent(removed, json, "<p>Удалённая</p>", "Удалённая");
+        source.Delete(removed);
+
+        StorageMigrationService.CopyAll(source, target);
+
+        var copied = target.LoadTree().SelectMany(Flatten).ToList();
+        Assert.DoesNotContain(copied, x => x.Title == "Удалённая страница");
+        Assert.Empty(target.LoadTrash());
+
+        var document = copied.Single(x => x.Title == "Страница с содержимым");
+        var content = target.LoadStructuredContent(document.Id);
+        Assert.Equal(json, content.Json);
+        Assert.Contains("<h1>Раздел</h1>", content.Html);
+        Assert.Contains("Текст страницы", content.PlainText);
+        Assert.Contains("Текст страницы", target.GetDocumentMarkdown(document.Id));
+    }
+
+    /// <summary>Документ, помеченный шаблоном, попадает в список шаблонов и остаётся в дереве.</summary>
+    [Fact]
+    public void TemplateAppearsInTemplatesList()
+    {
+        var database = new DatabaseService();
+        database.Initialize();
+
+        var id = database.Create(null, false, "Шаблон отчёта");
+        database.SetTemplate(id, true);
+
+        Assert.Contains(database.LoadTemplates(), x => x.Id == id);
+        // Дерево отдаёт признак шаблона — по нему список документов скрывает такие страницы.
+        Assert.True(database.LoadTree().SelectMany(Flatten).Single(x => x.Id == id).IsTemplate);
+    }
+
+    /// <summary>Вложенность приходит из хранилища: документ в подпапке — ребёнок этой подпапки.</summary>
+    [Fact]
+    public void NestedDocumentStaysInsideItsSubfolder()
+    {
+        var database = new DatabaseService();
+        database.Initialize();
+
+        var section = database.Create(null, true, "Раздел");
+        var subfolder = database.Create(section, true, "Подраздел");
+        var page = database.Create(subfolder, false, "Страница подраздела");
+
+        var root = Assert.Single(database.LoadTree());
+        var child = Assert.Single(root.Children);
+        Assert.Equal(subfolder, child.Id);
+        Assert.Equal(page, Assert.Single(child.Children).Id);
+    }
+
+    /// <summary>
+    /// Папка и документ — разные типы элементов: одинаковое название в одной папке допустимо,
+    /// а вот два документа или две папки с одним названием — нет.
+    /// </summary>
+    [Fact]
+    public void FolderAndDocumentMayShareTitleButSameKindMayNot()
+    {
+        var database = new DatabaseService();
+        database.Initialize();
+
+        var folder = database.Create(null, true, "Раздел");
+        var document = database.Create(null, false, "Раздел");
+        Assert.NotEqual(folder, document);
+
+        var sameFolder = Assert.Throws<InvalidOperationException>(() => database.Create(null, true, "Раздел"));
+        Assert.Contains("папка", sameFolder.Message);
+        var sameDocument = Assert.Throws<InvalidOperationException>(() => database.Create(null, false, "Раздел"));
+        Assert.Contains("документ", sameDocument.Message);
+
+        Assert.True(database.TitleExists(null, "Раздел", null, true));
+        Assert.True(database.TitleExists(null, "Раздел", null, false));
+        Assert.False(database.TitleExists(null, "Раздел 2", null, false));
+    }
+
+    /// <summary>
+    /// Повторная выгрузка тех же страниц обновляет их в целевой базе, а не создаёт копии —
+    /// ни самих страниц, ни записей о вложениях.
+    /// </summary>
+    [Fact]
+    public void RepeatedTransferUpdatesPagesInsteadOfDuplicatingThem()
+    {
+        var source = new SqliteDocumentStore(Path.Combine(AppPaths.Data, "repeat-source.db"));
+        source.Initialize();
+        var target = new SqliteDocumentStore(Path.Combine(AppPaths.Data, "repeat-target.db"));
+        target.Initialize();
+
+        var folder = source.Create(null, true, "Раздел");
+        var page = source.Create(folder, false, "Страница");
+        source.SaveStructuredContent(page, "{\"v\":1}", "<p>Первая редакция</p>", "Первая редакция");
+        source.SaveAssetContent("scheme.png", "HASH-SCHEME", "image/png", Png);
+        source.RegisterAttachment(page, "scheme.png", "scheme.png", "image/png", Png.LongLength, "HASH-SCHEME");
+
+        StorageMigrationService.CopyAll(source, target);
+        source.SaveStructuredContent(page, "{\"v\":2}", "<p>Вторая редакция</p>", "Вторая редакция");
+        var report = StorageMigrationService.CopyAll(source, target);
+
+        var copied = target.LoadTree().SelectMany(Flatten).ToList();
+        Assert.Single(copied, x => x.Title == "Страница");
+        Assert.Single(copied, x => x.Title == "Раздел");
+        Assert.Equal(1, report.Updated);
+
+        var document = copied.Single(x => x.Title == "Страница");
+        Assert.Equal("{\"v\":2}", target.LoadStructuredContent(document.Id).Json);
+        Assert.Single(target.GetAttachments(document.Id));
+        Assert.Equal(source.GetDocumentGuid(page), target.GetDocumentGuid(document.Id));
+    }
+
     [Fact]
     public void PdfExportContainsDocumentTextEvenWithoutPlainText()
     {

@@ -22,13 +22,24 @@ public interface IDocumentStore
     NodeItem? FindNode(long id);
     long Create(long? parentId, bool folder, string title);
     long Create(long? parentId, bool folder, string title, bool isPrivate);
-    bool TitleExists(long? parentId, string title, long? exceptId = null);
+    /// <summary>
+    /// Занято ли название в папке. Папки и документы — разные типы элементов и названия друг у
+    /// друга не отнимают: <paramref name="isFolder"/> ограничивает проверку своим типом,
+    /// null — проверить оба. Удалённое в корзину название не занимает.
+    /// </summary>
+    bool TitleExists(long? parentId, string title, long? exceptId = null, bool? isFolder = null);
     void Rename(long id, string title);
     void SetTemplate(long id, bool value);
     long CreateFromTemplate(long templateId, long? parentId, string title, IReadOnlyDictionary<string, string>? variables = null);
     IReadOnlyList<string> GetTemplateVariables(long templateId);
     string GetDocumentGuid(long id);
     NodeItem? FindDocumentByGuid(string guid);
+    /// <summary>
+    /// Задаёт постоянный идентификатор страницы. Нужен при переносе между базами: копия
+    /// сохраняет идентификатор оригинала, поэтому повторная выгрузка обновляет ту же страницу,
+    /// а не создаёт её заново.
+    /// </summary>
+    void SetDocumentGuid(long id, string guid);
     void Move(long id, long? parentId);
     void Delete(long id);
     void Restore(long id);
@@ -63,9 +74,9 @@ public interface IDocumentStore
     bool AssetExists(string storedName);
     IReadOnlyList<string> GetReferencedAssetNames(long documentId);
 
-    // Настройки и обслуживание хранилища
-    string? GetSetting(string key);
-    void SetSetting(string key, string value);
+    // Обслуживание хранилища. Состояния интерфейса (размеры окна, раскрытые узлы и т.п.)
+    // здесь намеренно нет: это данные рабочего места, они хранятся локально
+    // (см. <see cref="LocalStateService"/>) и не попадают в общую базу документации.
     void Checkpoint();
     string CheckIntegrity();
     long CountDocuments();

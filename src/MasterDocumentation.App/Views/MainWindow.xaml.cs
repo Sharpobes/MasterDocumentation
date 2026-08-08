@@ -106,11 +106,67 @@ public partial class MainWindow : Window
     private void NewDocument_Click(object sender, RoutedEventArgs e){CreateMenuPopup.IsOpen=false;CreateNode(false);}
     /// <summary>Раздела как отдельной сущности нет: раздел — это обычная папка верхнего уровня.</summary>
     private void NewFolder_Click(object sender, RoutedEventArgs e){CreateMenuPopup.IsOpen=false;CreateNode(true);}
-    private void NewTemplate_Click(object sender,RoutedEventArgs e){CreateMenuPopup.IsOpen=false;var id=CreateNode(false);if(id is long value){_vm.Database.SetTemplate(value,true);_vm.ReloadTree();}}
-    private void SectionAdd_Click(object sender,RoutedEventArgs e)=>CreateMenu_Click(SectionAddButton,e);
-    private long? CreateNode(bool folder)
+    /// <summary>
+    /// Создание внутри папки из её контекстного меню. Родитель берётся у папки, по которой был
+    /// правый щелчок, а не у текущего выделения: иначе элемент уходил в корневую папку, если
+    /// выделение осталось на другом узле дерева.
+    /// </summary>
+    private void NewDocumentInFolder_Click(object sender,RoutedEventArgs e)=>CreateNode(false,ContextFolderId());
+    private void NewFolderInFolder_Click(object sender,RoutedEventArgs e)=>CreateNode(true,ContextFolderId());
+    private long? ContextFolderId()=>_contextMenuNode is null?TargetFolder():_contextMenuNode.IsFolder?_contextMenuNode.Id:_contextMenuNode.ParentId;
+    /// <summary>
+    /// Раскрывает все папки до созданного элемента и выделяет его: иначе документ, созданный
+    /// во вложенной папке, оставался невидимым — папка была свёрнута, и казалось, что он не там.
+    /// </summary>
+    private void RevealNode(long id)
     {
-        var roots=_vm.Database.LoadTree();var storage=_vm.Database.ActiveProvider==MasterDocumentation.Storage.StorageProviderKind.Postgres?$"Хранилище: общая база данных PostgreSQL, вы подключены как «{UserIdentity.Current}».":"Хранилище: локальная база. Признак приватности сохранится при выгрузке документа в общую базу данных.";var dialog=new NewItemDialog(roots,_vm.Database.LoadTemplates(),folder,TargetFolder(),storage){Owner=this};if(dialog.ShowDialog()!=true)return null;
+        var path=new List<NodeItem>();
+        bool Walk(NodeItem node)
+        {
+            path.Add(node);
+            if(node.Id==id)return true;
+            foreach(var child in node.Children)if(Walk(child))return true;
+            path.RemoveAt(path.Count-1);
+            return false;
+        }
+        foreach(var root in _vm.Nodes)if(Walk(root))break;
+        if(path.Count==0)return;
+        foreach(var node in path)node.IsExpanded=true;
+        _vm.SelectedNode=path[^1];
+        SaveExpandedNodes();
+        Dispatcher.BeginInvoke(new Action(()=>SelectTreeItem(path[^1])),System.Windows.Threading.DispatcherPriority.Background);
+    }
+    private void SelectTreeItem(NodeItem node)
+    {
+        if(Tree.ItemContainerGenerator.ContainerFromItem(node) is TreeViewItem container){container.IsSelected=true;container.BringIntoView();return;}
+        // Вложенный элемент: контейнеры дочерних узлов создаются только у раскрытых папок.
+        foreach(var root in _vm.Nodes)if(SelectNested(Tree.ItemContainerGenerator,root,node))return;
+    }
+    private static bool SelectNested(System.Windows.Controls.ItemContainerGenerator generator,NodeItem current,NodeItem target)
+    {
+        if(generator.ContainerFromItem(current) is not TreeViewItem container)return false;
+        if(ReferenceEquals(current,target)){container.IsSelected=true;container.BringIntoView();return true;}
+        container.UpdateLayout();
+        foreach(var child in current.Children)if(SelectNested(container.ItemContainerGenerator,child,target))return true;
+        return false;
+    }
+    /// <summary>
+    /// Новый шаблон. Он открывается для правки, а список слева сразу переключается на «Шаблоны»,
+    /// чтобы было видно, куда шаблон попал: в списке документов шаблоны не показываются.
+    /// </summary>
+    private void NewTemplate_Click(object sender,RoutedEventArgs e)
+    {
+        CreateMenuPopup.IsOpen=false;
+        if(CreateNode(false,null,true) is not long id)return;
+        _vm.Database.SetTemplate(id,true);
+        Templates_Click(sender,e);
+        UpdateNavigationCounts();
+        ToastService.Show("Шаблон создан","Он открыт для правки и доступен в разделе «Шаблоны».",ToastKind.Success);
+    }
+    private void SectionAdd_Click(object sender,RoutedEventArgs e)=>CreateMenu_Click(SectionAddButton,e);
+    private long? CreateNode(bool folder,long? parentOverride=null,bool asTemplate=false)
+    {
+        var roots=_vm.Database.LoadTree();var storage=_vm.Database.ActiveProvider==MasterDocumentation.Storage.StorageProviderKind.Postgres?$"Хранилище: общая база данных PostgreSQL, вы подключены как «{UserIdentity.Current}».":"Хранилище: локальная база. Признак приватности сохранится при выгрузке документа в общую базу данных.";var dialog=new NewItemDialog(roots,_vm.Database.LoadTemplates(),folder,parentOverride??TargetFolder(),storage,asTemplate){Owner=this};if(dialog.ShowDialog()!=true)return null;
         try
         {
             IReadOnlyDictionary<string,string>? values=null;
@@ -121,7 +177,7 @@ public partial class MainWindow : Window
             }
             var id=dialog.TemplateId is long source?_vm.Database.CreateFromTemplate(source,dialog.ParentId,dialog.ItemTitle,values):_vm.Database.Create(dialog.ParentId,dialog.IsFolder,dialog.ItemTitle,dialog.IsPrivate);
             if(dialog.TemplateId is not null&&dialog.IsPrivate)_vm.Database.SetDocumentAccess(id,true);
-            _vm.ReloadTree();UpdateNavigationCounts();if(!dialog.IsFolder){var node=FindNode(_vm.Nodes,id);if(node is not null){_vm.Open(node);ShowSelectedTab(true,"start");}}return id;
+            _navigationMode="all";_vm.ReloadTree();UpdateNavigationCounts();RevealNode(id);if(!dialog.IsFolder){var node=FindNode(_vm.Nodes,id);if(node is not null){_vm.Open(node);ShowSelectedTab(true,"start");}}return id;
         }
         catch(Exception ex){MessageBox.Show(this,ex.Message,"Не удалось создать",MessageBoxButton.OK,MessageBoxImage.Warning);return null;}
     }
@@ -200,7 +256,8 @@ public partial class MainWindow : Window
         if(_vm.SelectedTab is null)LoadStartPage();
         ToastService.Show("Импорт из базы данных завершён","Выбранные страницы добавлены в текущее хранилище.",ToastKind.Success);
     }
-    private string UniqueTitle(long? parent,string value){var title=string.IsNullOrWhiteSpace(value)?"Импортированный документ":value.Trim();if(!_vm.Database.TitleExists(parent,title))return title;for(var i=2;;i++){var candidate=$"{title} ({i})";if(!_vm.Database.TitleExists(parent,candidate))return candidate;}}
+    /// <summary>Свободное название документа в папке: папки одноимённых названий не занимают.</summary>
+    private string UniqueTitle(long? parent,string value){var title=string.IsNullOrWhiteSpace(value)?"Импортированный документ":value.Trim();if(!_vm.Database.TitleExists(parent,title,null,false))return title;for(var i=2;;i++){var candidate=$"{title} ({i})";if(!_vm.Database.TitleExists(parent,candidate,null,false))return candidate;}}
     private static (string Html,string Plain) ImportDocx(string path){using var document=WordprocessingDocument.Open(path,false);var paragraphs=document.MainDocumentPart?.Document?.Body?.Elements<OpenXmlParagraph>()??[];var html=new System.Text.StringBuilder();var plain=new System.Text.StringBuilder();foreach(var paragraph in paragraphs){var text=paragraph.InnerText;plain.AppendLine(text);var style=paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value??"";var match=Regex.Match(style,@"Heading\s*([1-6])",RegexOptions.IgnoreCase);if(match.Success)html.Append($"<h{match.Groups[1].Value}>{System.Net.WebUtility.HtmlEncode(text)}</h{match.Groups[1].Value}>");else html.Append($"<p>{System.Net.WebUtility.HtmlEncode(text)}</p>");}return(html.ToString(),plain.ToString().TrimEnd());}
     /// <summary>
     /// Переносит изображения импортируемого файла в хранилище: файл копируется в папку вложений
@@ -712,9 +769,19 @@ public partial class MainWindow : Window
             "favorites"=>("Нет избранных документов","Добавляйте часто используемые документы в избранное через контекстное меню.",Visibility.Collapsed,AppIconKind.Star),
             "recent"=>("Нет недавних документов","Откройте документ — он появится здесь для быстрого доступа.",Visibility.Collapsed,AppIconKind.Clock),
             "trash"=>("Корзина пуста",$"Удалённые документы можно восстановить отсюда в течение {DatabaseService.TrashRetentionDays} дней.",Visibility.Collapsed,AppIconKind.Trash),
-            "templates"=>("Нет шаблонов","Создайте документ и выберите «Использовать как шаблон» в контекстном меню.",Visibility.Visible,AppIconKind.Template),
+            "templates"=>("Нет шаблонов","Создайте шаблон здесь или пометьте готовый документ пунктом «Использовать как шаблон» в контекстном меню.",Visibility.Visible,AppIconKind.Template),
             _=>("Нет документов","Создайте первый документ, чтобы начать работу.",Visibility.Visible,AppIconKind.Documents)
         };
+        NavigationEmptyAction.Content=_navigationMode=="templates"?"Создать шаблон":"Создать документ";
+    }
+    /// <summary>
+    /// Кнопка пустого списка создаёт то, чего в этом разделе не хватает: в «Шаблонах» — шаблон,
+    /// иначе обычный документ. Раньше она везде создавала документ, и созданный из раздела
+    /// шаблонов он оказывался в списке документов.
+    /// </summary>
+    private void NavigationEmptyAction_Click(object sender,RoutedEventArgs e)
+    {
+        if(_navigationMode=="templates")NewTemplate_Click(sender,e);else NewDocument_Click(sender,e);
     }
     private void AllDocuments_Click(object sender, RoutedEventArgs e) { _navigationMode="all";_vm.ShowAll();UpdateNavigationEmptyState(); }
     private void Favorites_Click(object sender, RoutedEventArgs e) { _navigationMode="favorites";_vm.ShowFavorites();UpdateNavigationEmptyState(); }
@@ -741,7 +808,7 @@ public partial class MainWindow : Window
             "recent"=>"НЕДАВНИЕ",
             "trash"=>"КОРЗИНА",
             "templates"=>"ШАБЛОНЫ",
-            _=>"РАЗДЕЛЫ"
+            _=>"ДОКУМЕНТЫ"
         };
         // Создавать документ можно только в обычном списке: в корзине или недавних для новой
         // записи нет места.
@@ -767,9 +834,14 @@ public partial class MainWindow : Window
         var hasNode=node is not null;
         var documentOutsideTrash=node is not null&&!node.IsFolder&&!inTrash;
         OpenMenuItem.Visibility=hasNode?Visibility.Visible:Visibility.Collapsed;
+        var folderOutsideTrash=node is not null&&node.IsFolder&&!inTrash;
+        NewDocumentInFolderMenuItem.Visibility=folderOutsideTrash?Visibility.Visible:Visibility.Collapsed;
+        NewFolderInFolderMenuItem.Visibility=folderOutsideTrash?Visibility.Visible:Visibility.Collapsed;
+        CreateMenuSeparator.Visibility=folderOutsideTrash?Visibility.Visible:Visibility.Collapsed;
         DuplicateMenuItem.Visibility=documentOutsideTrash?Visibility.Visible:Visibility.Collapsed;
         CopyLinkMenuItem.Visibility=documentOutsideTrash?Visibility.Visible:Visibility.Collapsed;
         MakeTemplateMenuItem.Visibility=documentOutsideTrash?Visibility.Visible:Visibility.Collapsed;
+        MakeTemplateMenuItem.Header=_navigationMode=="templates"?"Убрать из шаблонов":"Использовать как шаблон";
         FavoriteMenuItem.Visibility=documentOutsideTrash?Visibility.Visible:Visibility.Collapsed;
         if(documentOutsideTrash)FavoriteMenuItem.Header=IsFavorite(node!.Id)?"Убрать из избранного":"Добавить в избранное";
         RenameMenuItem.Visibility=hasNode&&!inTrash?Visibility.Visible:Visibility.Collapsed;
@@ -808,7 +880,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void Tree_PreviewMouseLeftButtonUp(object sender,MouseButtonEventArgs e)
     {
-        if((ItemsControl.ContainerFromElement(Tree,e.OriginalSource as DependencyObject) as TreeViewItem)?.DataContext is not NodeItem node)
+        if(TreeItemFromSource(e.OriginalSource as DependencyObject)?.DataContext is not NodeItem node)
         {
             // Щелчок по пустому месту снимает выбор: без этого новый документ или вставка всегда
             // попадали в последнюю выбранную папку, и выйти из неё было нечем.
@@ -842,7 +914,7 @@ public partial class MainWindow : Window
     }
     private void Tree_PreviewMouseRightButtonDown(object sender,MouseButtonEventArgs e)
     {
-        var item=ItemsControl.ContainerFromElement(Tree,e.OriginalSource as DependencyObject) as TreeViewItem;
+        var item=TreeItemFromSource(e.OriginalSource as DependencyObject);
         _contextMenuNode=item?.DataContext as NodeItem;
         if(item is null)return;
         item.IsSelected=true;
@@ -866,7 +938,20 @@ public partial class MainWindow : Window
     private static void SetExpanded(NodeItem node,bool value){node.IsExpanded=value;foreach(var child in node.Children)SetExpanded(child,value);}
     private void Tree_ExpansionChanged(object sender,RoutedEventArgs e){Dispatcher.BeginInvoke(SaveExpandedNodes,System.Windows.Threading.DispatcherPriority.Background);}
     private void SaveExpandedNodes(){var ids=new List<long>();void Visit(NodeItem node){if(node.IsExpanded)ids.Add(node.Id);foreach(var child in node.Children)Visit(child);}foreach(var node in _vm.Nodes)Visit(node);_vm.Database.SetSetting("ExpandedNodeIds",string.Join(',',ids));}
-    private void MakeTemplate_Click(object sender,RoutedEventArgs e){if(_vm.SelectedNode is null||_vm.SelectedNode.IsFolder){MessageBox.Show(this,"Шаблоном может быть только документ.");return;}_vm.Save(_vm.Tabs.FirstOrDefault(x=>x.DocumentId==_vm.SelectedNode.Id));_vm.Database.SetTemplate(_vm.SelectedNode.Id,true);ToastService.Show("Шаблон создан","Документ доступен в списке шаблонов.",ToastKind.Success);}
+    /// <summary>
+    /// Пометка документа шаблоном и снятие пометки (в разделе «Шаблоны» пункт работает наоборот).
+    /// После этого список перечитывается: шаблоны показываются только в своём разделе.
+    /// </summary>
+    private void MakeTemplate_Click(object sender,RoutedEventArgs e)
+    {
+        if(_vm.SelectedNode is null||_vm.SelectedNode.IsFolder){MessageBox.Show(this,"Шаблоном может быть только документ.");return;}
+        var makeTemplate=_navigationMode!="templates";
+        _vm.Save(_vm.Tabs.FirstOrDefault(x=>x.DocumentId==_vm.SelectedNode.Id));
+        _vm.Database.SetTemplate(_vm.SelectedNode.Id,makeTemplate);
+        if(makeTemplate)_vm.ReloadTree();else _vm.ShowTemplates();
+        UpdateNavigationCounts();
+        ToastService.Show(makeTemplate?"Шаблон создан":"Документ больше не шаблон",makeTemplate?"Документ убран из списка документов и доступен в разделе «Шаблоны».":"Документ вернулся в список документов.",ToastKind.Success);
+    }
     /// <summary>Кнопка работает как переключатель: повторное нажатие возвращает список всех документов.</summary>
     private void Templates_Click(object sender,RoutedEventArgs e)
     {
@@ -1621,7 +1706,7 @@ public partial class MainWindow : Window
             TreeRootDropHint.Visibility = Visibility.Collapsed;
         }
     }
-    protected override void OnPreviewMouseLeftButtonDown(MouseButtonEventArgs e) { _dragStart = e.GetPosition(Tree); _dragNode = (ItemsControl.ContainerFromElement(Tree, e.OriginalSource as DependencyObject) as TreeViewItem)?.DataContext as NodeItem; base.OnPreviewMouseLeftButtonDown(e); }
+    protected override void OnPreviewMouseLeftButtonDown(MouseButtonEventArgs e) { _dragStart = e.GetPosition(Tree); _dragNode = TreeItemFromSource(e.OriginalSource as DependencyObject)?.DataContext as NodeItem; base.OnPreviewMouseLeftButtonDown(e); }
     protected override void OnPreviewMouseLeftButtonUp(MouseButtonEventArgs e) { _dragNode = null; base.OnPreviewMouseLeftButtonUp(e); }
     private void Tree_DragOver(object sender, DragEventArgs e)
     {
@@ -1634,11 +1719,21 @@ public partial class MainWindow : Window
     }
     private void Tree_DragLeave(object sender, DragEventArgs e) => TreeRootDropHint.Visibility = Visibility.Collapsed;
     /// <summary>Строка дерева под точкой; null — щелчок или отпускание пришлись на пустое место панели.</summary>
-    private NodeItem? TreeItemAt(Point point)
+    private NodeItem? TreeItemAt(Point point) => (TreeItemFromSource(Tree.InputHitTest(point) as DependencyObject))?.DataContext as NodeItem;
+
+    /// <summary>
+    /// Строка дерева, которой принадлежит элемент под курсором. Именно подъём по визуальному
+    /// дереву, а не ItemsControl.ContainerFromElement(Tree, …): контейнеры вложенных узлов
+    /// создаёт не сам TreeView, а их родительская строка, поэтому тот вызов возвращал строку
+    /// верхнего уровня. Из-за этого правый щелчок и перетаскивание работали с корневой папкой
+    /// вместо выбранной вложенной — документы создавались не там, а перенос в подпапку
+    /// заканчивался ошибкой «Нельзя переместить папку внутрь самой себя».
+    /// </summary>
+    private static TreeViewItem? TreeItemFromSource(DependencyObject? source)
     {
-        var element = Tree.InputHitTest(point) as DependencyObject;
-        while (element is not null && element is not TreeViewItem) element = VisualTreeHelper.GetParent(element);
-        return (element as TreeViewItem)?.DataContext as NodeItem;
+        while (source is not null and not TreeViewItem)
+            source = source is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(source) : LogicalTreeHelper.GetParent(source);
+        return source as TreeViewItem;
     }
     // Перенос мимо строк выносит элемент в корень: иначе из единственной папки его некуда деть.
     private void Tree_Drop(object sender, DragEventArgs e)
@@ -2186,19 +2281,25 @@ public partial class MainWindow : Window
         UpdateSettingsTabState();
         Dispatcher.BeginInvoke(new Action(UpdateSettingsHostSize));
     }
+    /// <summary>
+    /// Уход с вкладки настроек на документ. Кроме скрытия панели надо вернуть браузер редактора:
+    /// при показе настроек он сворачивается в нулевой размер и отсоединяется от дерева, и без
+    /// этого вызова документ открывался пустым — в нём нельзя было ни печатать, ни поставить курсор.
+    /// </summary>
     private void DeactivateSettings()
     {
         if(SettingsHost.Visibility!=Visibility.Visible)return;
         SettingsHost.Visibility=Visibility.Collapsed;
         UpdateSettingsTabState();
+        if(AttachmentPreviewOverlay.Visibility!=Visibility.Visible&&OperationOverlay.Visibility!=Visibility.Visible)ModernEditor.SetBrowserVisible(true);
     }
     private void UpdateSettingsTabState()
     {
         var active=SettingsHost.Visibility==Visibility.Visible;
         SettingsTabHeader.SetResourceReference(BackgroundProperty,active?"Background/Selected":"Background/SurfaceElevated");
         SettingsTabHeader.SetResourceReference(Border.BorderBrushProperty,active?"Accent/Primary":"Border/Default");
-        // Место под вкладку настроек забирается у ряда документов, иначе она уезжает под поиск.
-        Tabs.MaxWidth=SettingsTabHeader.Visibility==Visibility.Visible?520:720;
+        // Ограничение ширины списка вкладок убрано: место под вкладку настроек резервирует
+        // DockPanel полосы, а сами вкладки сжимаются по количеству (TabWidthConverter).
     }
     private void ApplySavedSettings(ApplicationSettings settings){_settings=settings;LocalizationService.SetLanguage(_settings.Language);LocalizationService.Apply(this);ApplyInterfacePreferences(_settings);_saveTimer.Interval=TimeSpan.FromSeconds(_settings.AutoSaveDelaySeconds);_vm.SetTheme(_settings.Theme,false);_=ModernEditor.ExecuteAsync("setTheme",new{theme=_vm.DarkTheme?"dark":"light"});_=ModernEditor.ExecuteAsync("setLanguage",new{language=LocalizationService.IsEnglish?"en":"ru"});Editor.FontFamily=new FontFamily(_settings.DefaultFont);Editor.FontSize=_settings.DefaultFontSize;Editor.SpellCheck.IsEnabled=_settings.SpellCheck;}
     private void SettingsHost_SizeChanged(object sender,SizeChangedEventArgs e)=>UpdateSettingsHostSize();

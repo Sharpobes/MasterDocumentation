@@ -51,7 +51,7 @@ public partial class App : Application
         var viewModel=_services.GetRequiredService<MainViewModel>();
         if(!string.IsNullOrWhiteSpace(firstDocumentTitle))
         {
-            var title=firstDocumentTitle.Trim();var candidate=title;for(var index=2;viewModel.Database.TitleExists(null,candidate);index++)candidate=$"{title} ({index})";var id=viewModel.Database.Create(null,false,candidate);var current=_services.GetRequiredService<SettingsService>().Load();current.OpenDocumentIds=[id];current.SelectedDocumentId=id;_services.GetRequiredService<SettingsService>().Save(current);viewModel.ReloadTree();
+            var title=firstDocumentTitle.Trim();var candidate=title;for(var index=2;viewModel.Database.TitleExists(null,candidate,null,false);index++)candidate=$"{title} ({index})";var id=viewModel.Database.Create(null,false,candidate);var current=_services.GetRequiredService<SettingsService>().Load();current.OpenDocumentIds=[id];current.SelectedDocumentId=id;_services.GetRequiredService<SettingsService>().Save(current);viewModel.ReloadTree();
         }
         MainWindow = _services.GetRequiredService<MainWindow>(); MainWindow.Show(); ShutdownMode=ShutdownMode.OnMainWindowClose;
     }

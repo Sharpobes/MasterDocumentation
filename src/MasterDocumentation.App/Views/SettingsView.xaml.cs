@@ -25,6 +25,8 @@ public partial class SettingsView : UserControl
     private bool _loading=true;
     private bool _dirty;
     private readonly string _initialLanguage;
+    /// <summary>Файлы, которые не доехали при последнем переносе: их можно доложить отдельной кнопкой.</summary>
+    private List<string> _pendingAssets=[];
     public event Action<ApplicationSettings>? SettingsSaved;
     public event Action? CloseRequested;
 
@@ -40,7 +42,7 @@ public partial class SettingsView : UserControl
         SelectCombo(LanguageBox,_settings.Language);SelectCombo(StartupBox,_settings.StartupBehavior);RecentCountText.Text=_settings.RecentFilesCount.ToString();CompactCheck.IsChecked=_settings.CompactMode;UpdatesCheck.IsChecked=_settings.CheckUpdates;TooltipsCheck.IsChecked=_settings.ShowTooltips;ConfirmDeleteCheck.IsChecked=_settings.ConfirmDelete;SelectCombo(LinkBox,_settings.LinkBehavior);SelectCombo(UnitsBox,_settings.MeasurementUnits);
         DefaultFontBox.SelectedItem=Fonts.SystemFontFamilies.FirstOrDefault(x=>x.Source==_settings.DefaultFont);DefaultFontSizeBox.Text=_settings.DefaultFontSize.ToString();SpellCheckBox.IsChecked=_settings.SpellCheck;AutoSaveDelayBox.Text=_settings.AutoSaveDelaySeconds.ToString();SelectCombo(ThemeBox,_settings.Theme);EncryptionCheck.IsChecked=_settings.EncryptManualBackups;
         DataPathBox.Text=AppPaths.Data;AssetsPathText.Text=AppPaths.Assets;BackupsPathText.Text=AppPaths.Backups;ExportsPathText.Text=AppPaths.Exports;DocumentsPathText.Text=AppPaths.Documents;StorageUserBox.Text=UserIdentity.Current;RuntimeText.Text=$"Версия .NET: {Environment.Version}";AppPathText.Text="Путь приложения: "+AppContext.BaseDirectory;LoadHotkeys();
-        StorageProviderPostgresRadio.IsChecked=_storageConfig.Provider==StorageProviderKind.Postgres;StorageProviderSqliteRadio.IsChecked=_storageConfig.Provider!=StorageProviderKind.Postgres;PostgresConnectionStringBox.Text=_storageConfig.PostgresConnectionString;PostgresConfigPanel.Visibility=_storageConfig.Provider==StorageProviderKind.Postgres?Visibility.Visible:Visibility.Collapsed;StorageProviderStatusText.Text="";
+        StorageProviderPostgresRadio.IsChecked=_storageConfig.Provider==StorageProviderKind.Postgres;StorageProviderSqliteRadio.IsChecked=_storageConfig.Provider!=StorageProviderKind.Postgres;PostgresConnectionStringBox.Text=_storageConfig.PostgresConnectionString;PostgresConfigPanel.Visibility=_storageConfig.Provider==StorageProviderKind.Postgres?Visibility.Visible:Visibility.Collapsed;StorageProviderStatusText.Text="";LoadPendingAssets();
         _dirty=false;SaveButton.IsEnabled=false;ApplyButton.IsEnabled=false;
     }
 
@@ -157,35 +159,93 @@ public partial class SettingsView : UserControl
     private void TestConnection_Click(object sender,RoutedEventArgs e)
     {
         var config=new StorageProviderConfig{Provider=StorageProviderKind.Postgres,PostgresConnectionString=PostgresConnectionStringBox.Text.Trim()};
-        if(string.IsNullOrWhiteSpace(config.PostgresConnectionString)){StorageProviderStatusText.Text="Укажите строку подключения.";return;}
+        if(!PostgresConnectionString.TryValidate(config.PostgresConnectionString,out var invalid)){StorageProviderStatusText.Text=invalid;return;}
         StorageProviderStatusText.Text="Проверка соединения…";
-        var ok=StorageConfigService.TestConnection(config,out var error);
-        StorageProviderStatusText.Text=ok?"Соединение с PostgreSQL успешно установлено.":"Не удалось подключиться: "+error;
+        var ok=StorageConfigService.TestConnection(config,out var error,out var databaseMissing,out var failure);
+        StorageProviderStatusText.Text=ok?(databaseMissing?"Сервер доступен. База ещё не создана — приложение создаст её и все таблицы само при переносе или запуске.":"Соединение с PostgreSQL успешно установлено."):"Не удалось подключиться: "+error;
+        if(!ok&&failure is not null)MessageBox.Show(Window.GetWindow(this),PostgresErrorInfo.Detailed(failure),"Проверка соединения",MessageBoxButton.OK,MessageBoxImage.Error);
     }
 
     private async void MigrateToPostgres_Click(object sender,RoutedEventArgs e)
     {
         var connectionString=PostgresConnectionStringBox.Text.Trim();
-        if(string.IsNullOrWhiteSpace(connectionString)){StorageProviderStatusText.Text="Укажите строку подключения перед переносом.";return;}
-        if(MessageBox.Show(Window.GetWindow(this),"Перенести текущую документацию (дерево, содержимое, теги, вложения, избранное, шаблоны) в указанную базу PostgreSQL? История версий и общие настройки (Settings) при переносе не копируются.","Перенос данных",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
+        if(!PostgresConnectionString.TryValidate(connectionString,out var invalid)){StorageProviderStatusText.Text=invalid;return;}
+        if(MessageBox.Show(Window.GetWindow(this),"Перенести текущую документацию (дерево, содержимое, теги, вложения, избранное, шаблоны) в указанную базу PostgreSQL? Сама база, таблицы и индексы будут созданы автоматически, если их ещё нет. Страницы, которые уже есть в базе, будут обновлены, а не продублированы. Удалённое в корзину и история версий не переносятся.","Перенос данных",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
         var button=sender as Button;var previousContent=button?.Content;
         if(button is not null){button.IsEnabled=false;button.Content="Перенос…";}
         StorageProviderStatusText.Text="Начинается перенос…";
         try
         {
             var progress=new Progress<string>(text=>StorageProviderStatusText.Text=text);
-            await Task.Run(()=>
+            var report=await Task.Run(()=>
             {
                 var source=new SqliteDocumentStore();source.Initialize();
                 var target=new PostgresDocumentStore(connectionString);
-                StorageMigrationService.CopyAll(source,target,progress);
+                return StorageMigrationService.CopyAll(source,target,progress);
             });
-            StorageProviderStatusText.Text="Перенос завершён успешно. Выберите PostgreSQL и сохраните настройки, чтобы приложение начало использовать новое хранилище.";
+            ShowReport(report,"Перенос данных в PostgreSQL");
+            if(!report.HasFailures)StorageProviderStatusText.Text=report.Summary()+" Выберите PostgreSQL и сохраните настройки, чтобы приложение начало использовать новое хранилище.";
         }
         catch(Exception ex)
         {
             LogService.Error("Не удалось перенести данные в PostgreSQL",ex);
-            StorageProviderStatusText.Text="Ошибка переноса: "+ex.Message;
+            StorageProviderStatusText.Text="Ошибка переноса: "+PostgresErrorInfo.Short(ex);
+            MessageBox.Show(Window.GetWindow(this),PostgresErrorInfo.Detailed(ex),"Перенос данных в PostgreSQL",MessageBoxButton.OK,MessageBoxImage.Error);
+        }
+        finally
+        {
+            if(button is not null){button.IsEnabled=true;button.Content=previousContent;}
+        }
+    }
+
+    /// <summary>
+    /// Показывает итог переноса. Если часть изображений или вложений не доехала (обычно из-за
+    /// прав пользователя базы), появляется кнопка повторного переноса только файлов — документацию
+    /// заново копировать не нужно.
+    /// </summary>
+    private void ShowReport(MigrationReport report,string title)
+    {
+        StorageProviderStatusText.Text=report.Summary();
+        _pendingAssets=report.FailedAssetNames.ToList();
+        RetryAssetsButton.Visibility=_pendingAssets.Count>0?Visibility.Visible:Visibility.Collapsed;
+        RetryAssetsButton.Content=$"Повторить перенос изображений ({_pendingAssets.Count})";
+        LocalStateService.Set(PendingAssetsKey,string.Join('|',_pendingAssets));
+        if(report.HasFailures)MessageBox.Show(Window.GetWindow(this),report.Details(),title,MessageBoxButton.OK,MessageBoxImage.Warning);
+    }
+
+    private const string PendingAssetsKey="PendingAssetTransfer";
+
+    private void LoadPendingAssets()
+    {
+        _pendingAssets=(LocalStateService.Get(PendingAssetsKey)??"").Split('|',StringSplitOptions.RemoveEmptyEntries).ToList();
+        RetryAssetsButton.Visibility=_pendingAssets.Count>0?Visibility.Visible:Visibility.Collapsed;
+        if(_pendingAssets.Count>0)RetryAssetsButton.Content=$"Повторить перенос изображений ({_pendingAssets.Count})";
+    }
+
+    private async void RetryAssets_Click(object sender,RoutedEventArgs e)
+    {
+        var connectionString=PostgresConnectionStringBox.Text.Trim();
+        if(!PostgresConnectionString.TryValidate(connectionString,out var invalid)){StorageProviderStatusText.Text=invalid;return;}
+        if(_pendingAssets.Count==0){RetryAssetsButton.Visibility=Visibility.Collapsed;return;}
+        var button=sender as Button;var previousContent=button?.Content;
+        if(button is not null){button.IsEnabled=false;button.Content="Перенос файлов…";}
+        try
+        {
+            var names=_pendingAssets.ToList();
+            var progress=new Progress<string>(text=>StorageProviderStatusText.Text=text);
+            var report=await Task.Run(()=>
+            {
+                var source=new SqliteDocumentStore();source.Initialize();
+                var target=new PostgresDocumentStore(connectionString);
+                return StorageMigrationService.CopyAssets(source,target,names,progress);
+            });
+            ShowReport(report,"Повторный перенос изображений");
+        }
+        catch(Exception ex)
+        {
+            LogService.Error("Не удалось повторно перенести изображения в PostgreSQL",ex);
+            StorageProviderStatusText.Text="Ошибка переноса файлов: "+PostgresErrorInfo.Short(ex);
+            MessageBox.Show(Window.GetWindow(this),PostgresErrorInfo.Detailed(ex),"Повторный перенос изображений",MessageBoxButton.OK,MessageBoxImage.Error);
         }
         finally
         {

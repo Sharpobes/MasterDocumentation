@@ -33,18 +33,32 @@ public static class StorageConfigService
     }
 
     /// <summary>Проверка соединения без изменения текущей активной конфигурации.</summary>
-    public static bool TestConnection(StorageProviderConfig config, out string error)
+    public static bool TestConnection(StorageProviderConfig config, out string error) => TestConnection(config, out error, out _);
+
+    /// <summary>
+    /// Проверка соединения. Отсутствующая база не считается ошибкой: приложение создаёт её
+    /// вместе со всеми таблицами самостоятельно (<see cref="PostgresProvisioning"/>), поэтому
+    /// такой случай возвращается отдельным флагом <paramref name="databaseMissing"/>.
+    /// </summary>
+    public static bool TestConnection(StorageProviderConfig config, out string error, out bool databaseMissing)
+        => TestConnection(config, out error, out databaseMissing, out _);
+
+    /// <summary>
+    /// То же самое, но с исходным исключением: интерфейс показывает по нему развёрнутое
+    /// описание (<see cref="PostgresErrorInfo.Detailed"/>) с кодом ошибки сервера и подсказкой.
+    /// </summary>
+    public static bool TestConnection(StorageProviderConfig config, out string error, out bool databaseMissing, out Exception? exception)
     {
         error = "";
+        databaseMissing = false;
+        exception = null;
         try
         {
             switch (config.Provider)
             {
                 case StorageProviderKind.Postgres:
-                    using (var connection = new Npgsql.NpgsqlConnection(config.PostgresConnectionString))
-                    {
-                        connection.Open();
-                    }
+                    if (!PostgresConnectionString.TryValidate(config.PostgresConnectionString, out error)) return false;
+                    databaseMissing = !PostgresProvisioning.DatabaseExists(config.PostgresConnectionString);
                     return true;
                 default:
                     return true;
@@ -52,7 +66,8 @@ public static class StorageConfigService
         }
         catch (Exception ex)
         {
-            error = ex.Message;
+            exception = ex;
+            error = PostgresErrorInfo.Short(ex);
             return false;
         }
     }

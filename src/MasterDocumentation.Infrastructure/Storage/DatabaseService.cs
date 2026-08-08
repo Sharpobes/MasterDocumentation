@@ -49,7 +49,13 @@ public sealed class DatabaseService : IDocumentStore
         return new SqliteDocumentStore();
     }
 
-    public void Initialize() => _store.Initialize();
+    public void Initialize()
+    {
+        _store.Initialize();
+        // Состояние интерфейса раньше лежало в таблице Settings локальной базы — переносим его
+        // в локальный файл один раз, чтобы не потерять размеры окна и раскрытые папки.
+        if (_store is SqliteDocumentStore sqlite) LocalStateService.ImportLegacy(sqlite.GetSetting);
+    }
 
     public List<NodeItem> LoadTree(string? query = null) => _store.LoadTree(query);
     public List<NodeItem> LoadFavorites() => _store.LoadFavorites();
@@ -59,13 +65,14 @@ public sealed class DatabaseService : IDocumentStore
     public NodeItem? FindNode(long id) => _store.FindNode(id);
     public long Create(long? parentId, bool folder, string title) => _store.Create(parentId, folder, title);
     public long Create(long? parentId, bool folder, string title, bool isPrivate) => _store.Create(parentId, folder, title, isPrivate);
-    public bool TitleExists(long? parentId, string title, long? exceptId = null) => _store.TitleExists(parentId, title, exceptId);
+    public bool TitleExists(long? parentId, string title, long? exceptId = null, bool? isFolder = null) => _store.TitleExists(parentId, title, exceptId, isFolder);
     public void Rename(long id, string title) { _store.Rename(id, title); MirrorMarkdown(id); }
     public void SetTemplate(long id, bool value) => _store.SetTemplate(id, value);
     public long CreateFromTemplate(long templateId, long? parentId, string title, IReadOnlyDictionary<string, string>? variables = null) => _store.CreateFromTemplate(templateId, parentId, title, variables);
     public IReadOnlyList<string> GetTemplateVariables(long templateId) => _store.GetTemplateVariables(templateId);
     public string GetDocumentGuid(long id) => _store.GetDocumentGuid(id);
     public NodeItem? FindDocumentByGuid(string guid) => _store.FindDocumentByGuid(guid);
+    public void SetDocumentGuid(long id, string guid) => _store.SetDocumentGuid(id, guid);
     public void Move(long id, long? parentId) => _store.Move(id, parentId);
     public void Delete(long id) => _store.Delete(id);
     public void Restore(long id) => _store.Restore(id);
@@ -133,8 +140,13 @@ public sealed class DatabaseService : IDocumentStore
         catch (Exception ex) { LogService.Error("Не удалось обновить .md-зеркало документа " + id, ex); }
     }
 
-    public string? GetSetting(string key) => _store.GetSetting(key);
-    public void SetSetting(string key, string value) => _store.SetSetting(key, value);
+    /// <summary>
+    /// Состояние интерфейса рабочего места (размеры окна, ширины панелей, раскрытые узлы).
+    /// Хранится локально и никогда не пишется в общую базу документации — в базе только сама
+    /// документация: страницы, папки, изображения и вложения, теги, статусы, свойства, версии.
+    /// </summary>
+    public string? GetSetting(string key) => LocalStateService.Get(key);
+    public void SetSetting(string key, string value) => LocalStateService.Set(key, value);
     public void Checkpoint() => _store.Checkpoint();
     public string CheckIntegrity() => _store.CheckIntegrity();
     public long CountDocuments() => _store.CountDocuments();

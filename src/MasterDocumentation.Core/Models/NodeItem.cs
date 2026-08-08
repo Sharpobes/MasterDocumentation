@@ -11,6 +11,8 @@ public sealed class NodeItem : INotifyPropertyChanged
     public long Id { get; set; }
     public long? ParentId { get; set; }
     public bool IsFolder { get; set; }
+    /// <summary>Документ-шаблон: в списке документов не показывается, для него есть раздел «Шаблоны».</summary>
+    public bool IsTemplate { get; set; }
     public string Title { get => _title; set { _title = value; OnChanged(); } }
     public int SortOrder { get; set; }
     public DateTime CreatedAt { get; set; }

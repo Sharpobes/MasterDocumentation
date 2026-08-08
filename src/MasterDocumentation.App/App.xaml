@@ -23,6 +23,7 @@
             </ResourceDictionary.MergedDictionaries>
             <local:NodeIconConverter x:Key="NodeIconConverter"/>
             <local:CountToVisibilityConverter x:Key="CountToVisibilityConverter"/>
+            <local:TabWidthConverter x:Key="TabWidthConverter"/>
             <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
         </ResourceDictionary>
     </Application.Resources>
